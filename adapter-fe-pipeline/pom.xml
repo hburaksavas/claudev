@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>dev.claudev</groupId>
+        <artifactId>claudev</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>adapter-fe-pipeline</artifactId>
+    <packaging>jar</packaging>
+    <name>adapter-fe-pipeline</name>
+    <description>ProjectPipelineProvider adapter: EnsureCheckout..HealthCheck step catalog + ExecStep escape hatch (D10). System/imported git.exe in V1, argv arrays only, no shell strings. Milestone M2 — not yet implemented; see docs/FE_PIPELINE_STEPS.md.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>dev.claudev</groupId>
+            <artifactId>provider-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.claudev</groupId>
+            <artifactId>platform-windows</artifactId>
+        </dependency>
+    </dependencies>
+</project>

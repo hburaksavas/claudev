@@ -518,6 +518,75 @@ All` leaves state that reconciles cleanly on next launch.
 
 ---
 
+## WP10 — RabbitMQ/Redis operational extras (not started)
+
+Added after a user question about two capabilities neither adapter has: pointing the app at an
+already-installed Redis/RabbitMQ instead of the app-managed path, and RabbitMQ plugin management
+(e.g. Shovel). Both are real, scoped gaps, not currently reachable through any UI or adapter method.
+
+**10a — Redis: manual connection UI.** `RedisConnectionProvider.connect(ConnectOptions)` already
+does exactly this for real (WP7) — the gap is purely UI: no screen lets a user type a host/port/
+password and call it. **Build:** a "Connect to Redis..." dialog in `ui-shell` (host, port, optional
+password) wired through a new `WorkspaceControlPort` method that calls `connect`, persists the
+connection (a `Connection` row — `ConnectionRepository` doesn't exist yet either, see
+`docs/DOMAIN_MODEL.md`), and a minimal key-browse view (`scan` + `getString`) to prove the round
+trip. **Acceptance:** connecting to the real Windows Redis test build (or any real Redis) from the
+UI, browsing its keys via `SCAN` paging, and reading a value back, all through clicked-through UI,
+not just the existing `RedisConnectionProviderTest`.
+
+**10b — RabbitMQ: `RuntimeSource.Imported` support.** The domain type already models "user pointed
+the app at an install directory they manage themselves"; `RabbitMqRuntimeProvider`'s constructor
+already takes a plain `RabbitMqInstallation(erlangHome, rabbitmqSbin)` regardless of where those
+paths came from. **Build:** a UI path (or at minimum a config property) to supply a user's own
+Erlang/RabbitMQ install paths instead of `RabbitMqProviderHolder` always calling `.provision()`;
+validate both paths (`erl.exe`, `rabbitmq-server.bat` exist) before accepting them, matching
+`ExecutableLocator`'s validate-before-spawn discipline in `adapter-fe-pipeline`. **Explicitly out of
+scope, not a smaller version of this item:** attaching to a RabbitMQ node the user starts and keeps
+running independently of this app. `RuntimeProvider`'s contract is "this app spawns and owns the
+process lifecycle" (Job Object, `start`/`stop`) — there is no "attach to an existing PID" shape in
+the port, and adding one would be a `RuntimeProvider`-wide port change, not a RabbitMQ-specific
+tweak. If that capability is wanted later, treat it as its own ADR-worthy decision, not folded in
+here.
+
+**10c — RabbitMQ: plugin management (Shovel, management, federation, ...).** Nothing exists today —
+no `RabbitMqPlugins` class, no port method, no UI. **Build:** a `RabbitMqPlugins` helper mirroring
+`RabbitMqCtl`'s shape (spawns `rabbitmq-plugins.bat enable/disable/list` via `cmd.exe /c` through
+WP1's launcher, same nodename/`ERLANG_HOME` environment); a new `RuntimeProvider`-adjacent capability
+to expose it (this doesn't fit the existing port's `start`/`stop`/`healthCheck` shape either — needs
+its own method or a RabbitMQ-specific escape hatch, a real design decision to make deliberately, not
+bolt on silently); a "Plugins" dialog in `WorkspacesPane` listing enabled/available plugins with
+enable/disable actions per instance. **Acceptance:** enabling Shovel on a real running test node via
+the UI, confirmed via `rabbitmq-plugins list` showing it enabled and (if scoped in) a real shovel
+actually moving a message between two real queues.
+
+---
+
+## Remaining backlog, replanned and prioritized (post-WP7)
+
+Supersedes scattered "not done"/"deferred" notes above as the actual next-up order — those notes
+stay as the historical record of what each WP decided to skip and why; this list is where to start.
+
+1. **10a — Redis manual connection UI.** Smallest, highest-leverage: the adapter already works,
+   this only exposes it. Also the first real exercise of a `ConnectionRepository`/persisted
+   `Connection` row, which nothing has needed until now.
+2. **10b — RabbitMQ `Imported` source support.** Small (a config/UI path plus validation), directly
+   answers "can a user bring their own RabbitMQ binaries" without touching the port.
+3. **10c — RabbitMQ plugin management.** Medium: needs a real port/capability decision (see 10c's
+   own scope note) before the mechanical `rabbitmq-plugins.bat` wiring is worth writing.
+4. **Redis Hash/List/Set/ZSet typed edit set.** Needs the `MutationRequest` DTO extension flagged in
+   WP7 (a field/member slot) — a deliberate second look at that shared port type, not a quick patch.
+5. **Redis `environmentClass` authorization + audit-entry gate.** The safety layer `authorizeMutation`
+   is currently named for but doesn't yet enforce — docs/REDIS_SCOPE.md's core safety property.
+6. **WP9 — packaging.** jlink/jpackage, code signing, licensing/SBOM gate, log rotation/redaction,
+   the bounded graceful-shutdown DAG. Large, and blocked in practice on RISK_REGISTER's still-open
+   jlink/jpackage no-admin-install spike.
+7. **RISK_REGISTER cleanup items**, roughly independent of the above and each other: a true clean-VM
+   run of the WP6 RabbitMQ spike (this session's spike ran on an already-tooled dev box); pre-spawn
+   argv logging (flagged since WP8); `ExecStep`'s per-workspace allow-list config surface (currently
+   only checks the path is absolute and exists); `MAX_PATH`/`\\?\` long-path support.
+
+---
+
 ## Spike status
 
 | Spike | Status |

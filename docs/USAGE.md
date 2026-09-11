@@ -72,28 +72,39 @@ specific to this repo.)
 
 ## Run the application
 
+`spring-boot:run` invoked as a bare goal runs across every project in the reactor it's given, not
+just the one you name with `-pl` — combined with `-am` that includes the parent aggregator (which
+has no `mainClass`) and fails before ever reaching `app-bootstrap`. Install the modules to the
+local repo once, then run `app-bootstrap` on its own:
+
 ```bash
-mvn -pl app-bootstrap -am spring-boot:run
+mvn install -DskipTests          # once per change to a non-app-bootstrap module
+cd app-bootstrap
+mvn spring-boot:run
 ```
 
-`-am` ("also make") builds the modules `app-bootstrap` depends on first. This starts the Spring
-context (`ClaudevApplication.main`), then launches the JavaFX window (`ClaudevShell`) against it —
-today that window shows only a placeholder label, since `ui-shell` has no real views yet.
+This starts the Spring context (`ClaudevApplication.main`) — including the `persistence` module's
+`PersistenceConfig`, which opens a real SQLite file under `~/.claudev/claudev.db` and applies the
+WAL/busy_timeout pragmas — then launches the JavaFX window (`ClaudevShell`) against it. Today that
+window shows only a placeholder label, since `ui-shell` has no real views yet.
 
 Equivalent two-step alternative (build a runnable jar, then run it):
 
 ```bash
-mvn -pl app-bootstrap -am package
+mvn -pl app-bootstrap package   # after the install step above
 java -jar app-bootstrap/target/claudev.jar
 ```
 
-**Not yet verified in this repo's own automation**: unlike the tests in the table above, actually
-launching the JavaFX window has not been exercised as part of building this skeleton — doing so
-opens a visible desktop window, which isn't something to trigger unattended. The command above
-reflects the documented single-JVM lifecycle design (Spring context starts and blocks until ready,
-then `Application.launch()` is called on the same thread) and Spring Boot's standard
-fat-jar-with-classpath JavaFX execution model; if it doesn't behave as described, that's a real bug
-worth filing, not an expected gap.
+**Verified**: this exact two-step (`install` then `spring-boot:run` from `app-bootstrap/`) has been
+run for real — `Started ClaudevApplication` logs, the JavaFX window opens (title "claudev"), and
+the process stays alive with no further errors. A harmless
+`Unsupported JavaFX configuration: classes were loaded from 'unnamed module'` warning is expected
+(the app runs JavaFX in classpath mode, not module-path mode) and is not a failure.
+
+A `spring.datasource.url`-based single-goal invocation (`mvn -pl app-bootstrap -am spring-boot:run`)
+will fail with "Unable to find a suitable main class" — this is a Maven reactor quirk with bare-goal
+CLI invocation across `-am`-pulled modules, not a project misconfiguration; use the two commands
+above instead.
 
 To quit, closing the window only hides it (`Platform.setImplicitExit(false)`, per
 [PROCESS_SAFETY.md](PROCESS_SAFETY.md)'s "window close = tray/minimize" decision) — there is no

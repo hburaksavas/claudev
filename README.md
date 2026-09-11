@@ -12,19 +12,22 @@ Maven multi-module build.
 
 ## Status
 
-Design/skeleton stage. `domain-core`, `provider-api`, `platform-windows`, `persistence`
-(pragma config), `secret-store-dpapi`, `secret-store-legacy`, and the `app-bootstrap`/`ui-shell`
-single-JVM lifecycle wiring are real, compiled, and test-verified **on a live Windows machine**
-(not mocked) — see the smoke tests in `platform-windows` and `secret-store-dpapi`. The three
-runtime adapters (`adapter-rabbitmq`, `adapter-redis`, `adapter-fe-pipeline`) and `operation-engine`
-are interface-only stubs; see [docs/MILESTONES.md](docs/MILESTONES.md) for what's next.
+Design/skeleton stage, but it **runs**: `mvn install -DskipTests && cd app-bootstrap && mvn spring-boot:run`
+starts the Spring context (real SQLite `DataSource` + WAL pragmas) and opens a JavaFX window —
+verified for real on this machine, not just compiled. `domain-core`, `provider-api`,
+`platform-windows`, `persistence`, `secret-store-dpapi`, and `secret-store-legacy` are real and
+test-verified **against live Win32/SQLite APIs**, not mocked — see the smoke tests in
+`platform-windows` and `secret-store-dpapi`. The three runtime adapters (`adapter-rabbitmq`,
+`adapter-redis`, `adapter-fe-pipeline`), `operation-engine`, and `ui-shell`'s actual views are
+interface-only stubs / a placeholder; see [docs/MILESTONES.md](docs/MILESTONES.md) for what's next.
 
 ## Quick start
 
 ```bash
-mvn compile                              # requires JDK 21 — see docs/USAGE.md if this fails
-mvn test                                 # includes real (not mocked) Win32/DPAPI/SQLite tests
-mvn -pl app-bootstrap -am spring-boot:run # launches the JavaFX shell against the Spring context
+mvn compile                 # requires JDK 21 — see docs/USAGE.md if this fails
+mvn test                    # includes real (not mocked) Win32/DPAPI/SQLite tests
+mvn install -DskipTests     # once, so app-bootstrap can resolve its sibling modules standalone
+cd app-bootstrap && mvn spring-boot:run   # launches the JavaFX shell — verified working
 ```
 
 Full setup, testing, running, packaging status, and how to pick up a stub adapter:

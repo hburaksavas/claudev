@@ -13,8 +13,13 @@ import org.springframework.context.ConfigurableApplicationContext;
  * first; only then is the JavaFX {@link Application} launched against the already-running
  * context. There is no second process, so there is no sidecar spawn/health-check/restart policy
  * to reason about.
+ *
+ * <p>{@code scanBasePackages} is widened to {@code dev.claudev} (beyond the default
+ * {@code dev.claudev.app} base package) because {@code @Configuration}/{@code @Component} beans
+ * live across module packages (e.g. {@code dev.claudev.persistence.PersistenceConfig}), not just
+ * under this class's own package.
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "dev.claudev")
 public class ClaudevApplication {
 
     private static volatile ConfigurableApplicationContext springContext;

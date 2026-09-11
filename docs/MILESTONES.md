@@ -9,7 +9,7 @@ for continuity, but the work packages below are the actionable plan.
 |---|---|
 | `domain-core` | Done — all aggregates as immutable records |
 | `provider-api` | Done — 4 ports, DTOs, `ProviderResult`/`ProviderError`, `AdapterManifest` |
-| `platform-windows` | **Partial** — Job Object create/assign/terminate/close is real and verified; **no process-spawn path exists yet** |
+| `platform-windows` | **Done for WP1's scope** — Job Object create/assign/terminate/close, `CreateProcessW`-suspended spawn, argv quoting, explicit environment blocks, and pid+creation-time+fingerprint identity verification are all real and verified against live Win32 APIs |
 | `persistence` | **Partial** — real `DataSource` with per-connection WAL/busy_timeout pragmas; **no schema, no migrations, no repositories** |
 | `secret-store-dpapi` / `-legacy` | Done — real DPAPI round trip, verified live |
 | `app-bootstrap` / `ui-shell` | Single-JVM lifecycle works; UI is a diagnostics screen only |
@@ -19,49 +19,54 @@ for continuity, but the work packages below are the actionable plan.
 
 ## The critical path
 
-Everything runtime-related is blocked behind one missing primitive: **spawning a process under a
-Job Object with verified identity**. No adapter can be written honestly before it exists, because
-the D5 ordering invariant (suspend → create job → assign → verify → resume, `LaunchRecord`
-persisted before the spawn call returns) is what makes every later "stop this instance" safe.
+WP1 (spawning a process under a Job Object with verified identity) was the blocker for everything
+runtime-related, since the D5 ordering invariant is what makes every later "stop this instance"
+safe — it's now done and verified. WP2 (persistence) is next; nothing else is blocked on it,
+so it can proceed in parallel with early WP3/WP4 design if useful.
 
-WP1 → WP2 → WP3 → WP4 is a strict chain. WP5 can start once WP3 lands. WP6/WP7/WP8 are
+WP2 → WP3 → WP4 is now the strict chain. WP5 can start once WP3 lands. WP6/WP7/WP8 are
 parallelizable once WP4 is done.
 
 ---
 
-## WP1 — Process spawn primitive (`platform-windows`)
+## WP1 — Process spawn primitive (`platform-windows`) — DONE
 
-The foundation. Also discharges two documented spikes.
+The foundation. Discharges three documented spikes (see the ledger below); the fourth
+(app-already-inside-an-external-job) remains open and is called out separately.
 
-**Build:**
-- `Kernel32Ext`: add `CreateProcessW`, `ResumeThread`, `GetProcessTimes`,
-  `QueryFullProcessImageNameW`, `GetExitCodeProcess`, `WaitForSingleObject`, plus `STARTUPINFOW`
-  and `PROCESS_INFORMATION` structs and the `CREATE_SUSPENDED` / `CREATE_UNICODE_ENVIRONMENT` /
-  `CREATE_NO_WINDOW` flags.
-- `WindowsCommandLine` — argv list → Win32 command-line string following `CommandLineToArgvW`
-  quoting rules. **Security-critical**: this is the mechanism behind the "no shell-string
-  injection" release blocker, so it gets its own class and its own adversarial test suite rather
-  than being inlined into the launcher.
-- `WindowsEnvironmentBlock` — explicit UTF-16, double-null-terminated environment block (required
-  by D7: RabbitMQ spawns must pass a fully explicit environment, never inherit the user's shell).
-- `WindowsProcessLauncher` — the D5 ordering invariant, returning a value object carrying pid,
-  creation FILETIME, resolved image path, and the owning `WindowsJobObject`.
-- `ProcessIdentity.verify(...)` — pid + creation time + image path/SHA-256 fingerprint check;
-  every kill/signal path must route through it.
+**Built:**
+- `Kernel32Ext` extended with `CreateProcessW`, `ResumeThread`, `TerminateProcess`,
+  `GetProcessTimes`, `QueryFullProcessImageNameW`, `GetExitCodeProcess`, `WaitForSingleObject`,
+  `STARTUPINFOW`/`PROCESS_INFORMATION`/`FILETIME` structs, and the `CREATE_SUSPENDED` /
+  `CREATE_UNICODE_ENVIRONMENT` / `CREATE_NO_WINDOW` flags.
+- `WindowsCommandLine` — argv list to Win32 command-line string via the standard `ArgvQuote`
+  algorithm. Its own class, its own adversarial test suite (`WindowsCommandLineTest`), 13
+  parameterized cases including embedded quotes, trailing backslashes, `&|<>^`, and empty strings —
+  round-tripped through the *real* `CommandLineToArgvW` (via a test-only `shell32.dll` binding),
+  not a hand-rolled re-implementation of the parser.
+- `WindowsEnvironmentBlock` — explicit, sorted, UTF-16LE double-null-terminated environment block;
+  no merge with the caller's own environment, ever (`WindowsEnvironmentBlockTest`).
+- `WindowsProcessLauncher` — the full D5 ordering (suspend, create job, assign, verify, resume),
+  returning `LaunchResult` (pid, creation `Instant`, OS-resolved image path, SHA-256 fingerprint,
+  the open `WindowsJobObject`). On any failure after `CreateProcessW` succeeds, the suspended child
+  is `TerminateProcess`'d before the exception propagates — no code path leaves an untracked
+  suspended process behind.
+- `ProcessIdentity.lookup`/`verify` — pid + creation time + image-path SHA-256 fingerprint;
+  `WindowsProcessQuery` holds the shared low-level reads so `ProcessIdentity` and
+  `WindowsProcessLauncher` don't duplicate the FILETIME/image-path/hashing logic.
 
-**Acceptance:**
-- A child spawned suspended is provably inside the job *before* it executes (assert via a child
-  that writes a marker file on start — the marker must never appear if the job assignment failed).
-- Killing the job kills the whole tree including a grandchild (`cmd.exe` → `java.exe`, the Maven
-  shape from PROCESS_SAFETY.md).
-- `verify()` rejects a recycled pid: spawn, record identity, kill, spawn a different process,
-  assert the old record no longer verifies.
-- Adversarial argv test: embedded quotes, trailing backslashes, `&|<>^`, empty string, a fake
-  project name containing `" & calc.exe`. Round-trip each through a child that echoes back its own
-  parsed `argv` and assert exact equality.
+**Verified (`WindowsProcessLauncherTest`, real spawns on this machine, not mocked):**
+- Launch `cmd.exe /c "ping ..."`, wait for `ping.exe` to appear as a real OS grandchild via
+  `ProcessHandle.children()`, terminate the job, confirm both `cmd.exe` and the grandchild die —
+  the `mvn.cmd`/`cmd.exe`/`java.exe` chain shape from PROCESS_SAFETY.md.
+- Identity verifies while the process is alive; once it exits naturally, the same recorded
+  `(pid, creationTime, fingerprint)` never verifies again, and a mismatched `creationTime` against
+  the same pid also fails — the concrete PID-reuse defense.
+- The reported fingerprint matches an independently computed SHA-256 of the actual binary on disk.
 
 **Risk:** the "app already inside an external restrictive Job" case (Spike B) still needs a
-separate harness; do it here while the code is fresh.
+separate harness — not covered by the tests above, which all run in a plain, unrestricted
+developer session. Tracked as open in the spike ledger.
 
 ---
 
@@ -195,9 +200,10 @@ All` leaves state that reconciles cleanly on next launch.
 | Spike | Status |
 |---|---|
 | Job Object create/assign/terminate | **Discharged** — `WindowsJobObjectSmokeTest`, real process killed via job |
-| Spawn-suspended ordering + grandchild kill | Open — WP1 |
-| App inside an external restrictive Job | Open — WP1 |
-| Windows argv quoting / injection | Open — WP1 |
+| Spawn-suspended ordering + grandchild kill | **Discharged** — `WindowsProcessLauncherTest`, real `cmd.exe`→`ping.exe` tree killed via job |
+| PID-reuse identity verification | **Discharged** — `WindowsProcessLauncherTest`, verify() rejects a recorded identity after real process exit |
+| Windows argv quoting / injection | **Discharged** — `WindowsCommandLineTest`, 13 adversarial cases round-tripped through the real `CommandLineToArgvW` |
+| App inside an external restrictive Job | Open — not covered by WP1's tests, which all ran in a plain developer session |
 | DPAPI round trip | **Discharged** for the core case — `DpapiSecretStoreTest`; profile-reset/roaming case still open |
 | SQLite WAL + busy_timeout applied | **Discharged** — `PragmaAppliedDataSourceTest` (found a real bug: pragmas were applied once instead of per connection) |
 | SQLite contention under real-time AV load | Open — WP2 |

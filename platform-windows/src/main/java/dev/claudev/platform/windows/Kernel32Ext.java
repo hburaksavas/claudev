@@ -1,6 +1,8 @@
 package dev.claudev.platform.windows;
 
+import com.sun.jna.Memory;
 import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.WinNT.HANDLE;
@@ -11,11 +13,10 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Minimal, self-declared bindings for the five kernel32.dll functions the Job Object supervision
- * model needs. Declared directly (not borrowed from jna-platform's own {@code Kernel32}
- * interface) so every field/signature here is something this module owns and can be audited
- * against the Win32 SDK headers, rather than inherited from however a third-party binding happens
- * to shape it.
+ * Minimal, self-declared bindings for the kernel32.dll functions the process-supervision model
+ * needs. Declared directly (not borrowed from jna-platform's own {@code Kernel32} interface) so
+ * every field/signature here is something this module owns and can be audited against the Win32
+ * SDK headers, rather than inherited from however a third-party binding happens to shape it.
  */
 final class Kernel32Ext {
 
@@ -30,10 +31,25 @@ final class Kernel32Ext {
     /** PROCESS_TERMINATE | PROCESS_SET_QUOTA — the minimum rights AssignProcessToJobObject needs. */
     static final int PROCESS_TERMINATE_AND_SET_QUOTA = 0x0001 | 0x0100;
 
+    /** PROCESS_QUERY_LIMITED_INFORMATION — WinNT.h; enough for GetProcessTimes/QueryFullProcessImageNameW. */
+    static final int PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    /** dwCreationFlags — WinBase.h. */
+    static final int CREATE_SUSPENDED = 0x00000004;
+    static final int CREATE_NO_WINDOW = 0x08000000;
+    static final int CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+
+    /** GetExitCodeProcess sentinel meaning "still running" — WinBase.h. */
+    static final int STILL_ACTIVE = 259;
+
+    static final int WAIT_OBJECT_0 = 0x00000000;
+    static final int WAIT_TIMEOUT = 0x00000102;
+    static final int WAIT_FAILED = -1;
+
     interface Lib extends StdCallLibrary {
         Lib INSTANCE = Native.load("kernel32", Lib.class, W32APIOptions.DEFAULT_OPTIONS);
 
-        HANDLE CreateJobObjectW(com.sun.jna.Pointer lpJobAttributes, WString lpName);
+        HANDLE CreateJobObjectW(Pointer lpJobAttributes, WString lpName);
 
         HANDLE OpenProcess(int desiredAccess, boolean inheritHandle, int processId);
 
@@ -50,6 +66,102 @@ final class Kernel32Ext {
         boolean CloseHandle(HANDLE hObject);
 
         int GetLastError();
+
+        /**
+         * {@code lpApplicationName} is the resolved, canonicalized executable path (required by
+         * docs/SECURITY.md's centralized path validation — never left to PATH search).
+         * {@code lpCommandLine} must be a writable buffer (the API is documented as free to modify
+         * it in place), so callers pass a {@link Memory} they own, never a JNA {@code WString}
+         * (which is a scratch copy JNA does not guarantee is independently writable across calls).
+         */
+        boolean CreateProcessW(
+                WString lpApplicationName,
+                Memory lpCommandLine,
+                Pointer lpProcessAttributes,
+                Pointer lpThreadAttributes,
+                boolean bInheritHandles,
+                int dwCreationFlags,
+                Pointer lpEnvironment,
+                WString lpCurrentDirectory,
+                StartupInfo lpStartupInfo,
+                ProcessInformation lpProcessInformation);
+
+        int ResumeThread(HANDLE hThread);
+
+        boolean TerminateProcess(HANDLE hProcess, int uExitCode);
+
+        boolean GetProcessTimes(
+                HANDLE hProcess, FileTime lpCreationTime, FileTime lpExitTime,
+                FileTime lpKernelTime, FileTime lpUserTime);
+
+        /**
+         * {@code lpdwSize} is in/out: callers pass the buffer's char capacity, the API writes back
+         * the actual length written (not including the null terminator).
+         */
+        boolean QueryFullProcessImageNameW(HANDLE hProcess, int dwFlags, char[] lpExeName, int[] lpdwSize);
+
+        boolean GetExitCodeProcess(HANDLE hProcess, int[] lpExitCode);
+
+        int WaitForSingleObject(HANDLE hHandle, int dwMilliseconds);
+    }
+
+    /** _STARTUPINFOW, WinBase.h — only the fields this module ever sets are named beyond padding needs. */
+    public static class StartupInfo extends Structure {
+        public int cb = size();
+        public Pointer lpReserved;
+        public Pointer lpDesktop;
+        public Pointer lpTitle;
+        public int dwX;
+        public int dwY;
+        public int dwXSize;
+        public int dwYSize;
+        public int dwXCountChars;
+        public int dwYCountChars;
+        public int dwFillAttribute;
+        public int dwFlags;
+        public short wShowWindow;
+        public short cbReserved2;
+        public Pointer lpReserved2;
+        public HANDLE hStdInput;
+        public HANDLE hStdOutput;
+        public HANDLE hStdError;
+
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "cb", "lpReserved", "lpDesktop", "lpTitle", "dwX", "dwY", "dwXSize", "dwYSize",
+                    "dwXCountChars", "dwYCountChars", "dwFillAttribute", "dwFlags", "wShowWindow",
+                    "cbReserved2", "lpReserved2", "hStdInput", "hStdOutput", "hStdError");
+        }
+    }
+
+    /** _PROCESS_INFORMATION, WinBase.h — the two HANDLEs must each be closed by the caller. */
+    public static class ProcessInformation extends Structure {
+        public HANDLE hProcess;
+        public HANDLE hThread;
+        public int dwProcessId;
+        public int dwThreadId;
+
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("hProcess", "hThread", "dwProcessId", "dwThreadId");
+        }
+    }
+
+    /** FILETIME, WinBase.h — 100-ns ticks since 1601-01-01, split across two DWORDs. */
+    public static class FileTime extends Structure {
+        public int dwLowDateTime;
+        public int dwHighDateTime;
+
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("dwLowDateTime", "dwHighDateTime");
+        }
+
+        /** Combined 100-ns tick count, treating both halves as unsigned per the Win32 contract. */
+        long toTicks() {
+            return (((long) dwHighDateTime) << 32) | (dwLowDateTime & 0xFFFFFFFFL);
+        }
     }
 
     /** _JOBOBJECT_BASIC_LIMIT_INFORMATION, WinNT.h — natural x64 alignment matches JNA defaults. */

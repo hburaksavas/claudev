@@ -14,8 +14,11 @@ provider-api           RuntimeProvider / ConnectionProvider / ProjectPipelinePro
 operation-engine       DAG scheduler, cancellation, retry/compensation, Event Bus.
                        Depends on: domain-core, provider-api. [interface-only stub]
 
-platform-windows       JNA Win32 bindings: Job Objects (real, tested), CreateProcessW,
-                       handle lifecycle. Every raw HANDLE the app touches lives here.
+platform-windows       JNA Win32 bindings: Job Objects, CreateProcessW-suspended spawn, argv
+                       quoting, explicit environment blocks, pid+creation-time+SHA-256 identity
+                       verification (all real, tested against live Win32 APIs). Every raw
+                       HANDLE the app touches lives here; WindowsProcessLauncher is the only
+                       place allowed to call CreateProcessW directly.
                        Depends on: jna, jna-platform.
 
 persistence            SQLite WAL/busy-timeout config (real, tested), migrations,

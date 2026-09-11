@@ -11,7 +11,8 @@ Windows recycles PIDs quickly under load. Every kill/signal action verifies, in 
    `PING`, ...)?
 
 Any mismatch downgrades the instance to `ORPHANED` or `UNKNOWN` — never `RUNNING`, and never
-signaled.
+signaled. Steps 1-3 are implemented and verified in `platform-windows`'s `ProcessIdentity.verify`
+(step 4, the adapter-specific health probe, lives with each adapter once it exists).
 
 ## Job Object topology — one per component, not one per workspace
 
@@ -43,9 +44,15 @@ A startup reconciler pass explicitly diffs the OS process table (any process who
 resolves under the app's managed-binaries directory) against the set of `LaunchRecord`s. Anything
 running-but-unrecorded is `UNTRACKED` — a bug signal, not a legitimate orphan.
 
-`platform-windows`'s `WindowsJobObject` wraps the raw Win32 calls (verified against a real spawned
-process on a live machine — see `WindowsJobObjectSmokeTest`) but does **not** itself enforce this
-ordering; callers (the eventual `operation-engine`/adapter spawn code) must.
+`platform-windows`'s `WindowsProcessLauncher` implements this ordering end to end (`CreateProcessW`
+suspended → create the `KILL_ON_JOB_CLOSE` job → assign → resume, with the suspended child
+`TerminateProcess`'d if anything in between fails) and is the one place in the application allowed
+to call `CreateProcessW` directly — every adapter spawns through it, never through a hand-rolled
+native call or `ProcessBuilder`. Verified against real spawns on a live machine, not mocked: a
+`cmd.exe`→`ping.exe` grandchild tree dies when the job is terminated
+(`WindowsProcessLauncherTest`), and `ProcessIdentity.verify` correctly rejects a recorded identity
+once the original process has exited. The `LaunchRecord`-write-before-spawn-returns-success half of
+the invariant is still the caller's responsibility (`operation-engine`, not yet built — WP4).
 
 ## Reconciler states
 

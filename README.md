@@ -16,10 +16,12 @@ Design/skeleton stage, but it **runs**: `mvn install -DskipTests && cd app-boots
 starts the Spring context (real SQLite `DataSource` + WAL pragmas) and opens a JavaFX window —
 verified for real on this machine, not just compiled. `domain-core`, `provider-api`,
 `platform-windows`, `persistence`, `secret-store-dpapi`, and `secret-store-legacy` are real and
-test-verified **against live Win32/SQLite APIs**, not mocked — see the smoke tests in
-`platform-windows` and `secret-store-dpapi`. The three runtime adapters (`adapter-rabbitmq`,
-`adapter-redis`, `adapter-fe-pipeline`), `operation-engine`, and `ui-shell`'s actual views are
-interface-only stubs / a placeholder; see [docs/MILESTONES.md](docs/MILESTONES.md) for what's next.
+test-verified **against live Win32/SQLite APIs**, not mocked. `platform-windows` in particular now
+implements the full spawn-under-a-Job-Object-with-verified-identity primitive
+(`WindowsProcessLauncher`, `ProcessIdentity`) that every runtime adapter depends on — see
+[docs/MILESTONES.md](docs/MILESTONES.md) WP1. The three runtime adapters (`adapter-rabbitmq`,
+`adapter-redis`, `adapter-fe-pipeline`), `operation-engine`, and `ui-shell`'s workspace views are
+still stubs/not built; MILESTONES.md has the full plan.
 
 ## Quick start
 

@@ -284,19 +284,68 @@ box with existing JDK/Maven/git tooling already present) — worth one more pass
 a blocker to starting the build below. The adapter itself (the actual `adapter-rabbitmq` build) is
 **not started** — this entry only covers the spike that was blocking it.
 
-**Build (not started):** pinned RabbitMQ+Erlang pair acquisition with checksum verification;
-per-instance nodename/ports/cookie/data-dir isolation via WP1's explicit environment block (spike
-confirmed the exact env var set works: `ERLANG_HOME`, `RABBITMQ_BASE`, `RABBITMQ_NODENAME`,
-`RABBITMQ_NODE_PORT`, `RABBITMQ_DIST_PORT`, `RABBITMQ_SERVER_START_ARGS=-setcookie ...` for the
-server, `RABBITMQ_CTL_ERL_ARGS=-setcookie ...` for `rabbitmqctl`); EPMD as a ref-counted
-application-level dependency never owned by a single instance's job; readiness via the management
-API, not port occupancy; spawning through WP1's `WindowsProcessLauncher`/Job Object (the spike used
-`rabbitmq-server.bat` directly via `Start-Process`, not yet through the app's own launcher — that
-integration is part of this build, not proven by the spike). Spike binaries are cached at
-`D:\dev\workspace\claudev-spike` on this machine for reuse when this build starts.
+**Adapter built and verified, DONE — not yet wired into app-bootstrap (see below):**
 
-**Acceptance:** two simultaneous instances under a non-ASCII (Turkish) profile path; stopping one
-disturbs neither the other nor a pre-existing external EPMD; app crash leaves no orphaned Erlang VM.
+- `RabbitMqPinnedPair`: the exact `(Erlang/OTP 27.3.4.17, RabbitMQ 4.3.5)` pair the spike proved
+  works, with SHA-256 checksums computed against this session's own downloaded bytes (GitHub does
+  not publish a checksum for Erlang's Windows zip asset — see the honesty note in
+  `RabbitMqPinnedPair`'s javadoc).
+- `RabbitMqBinaryProvisioner`: real download (`java.net.http.HttpClient`) + SHA-256 verification +
+  zip extraction (with a zip-slip guard — rejects any entry that would land outside the target
+  dir) into a managed directory; idempotent (skips network entirely if the pair is already present).
+- `EpmdSupervisor`: proactively starts `epmd.exe` as a plain, unsupervised `ProcessBuilder` process
+  (never through `WindowsProcessLauncher`/a per-instance Job Object) before any node boots, so
+  Erlang finds it already listening and never spawns its own — sidesteps entirely the question of
+  whether epmd would inherit a node's Job Object if Erlang spawned it as a child.
+- `RabbitMqCtl` + `RabbitMqRuntimeProvider`: the real `RuntimeProvider` — `start` spawns
+  `rabbitmq-server.bat` via `cmd.exe /c` (required for a `.bat`, same `ADR-010` reasoning as
+  `MavenBuildExecutor`) through WP1's `WindowsProcessLauncher`/Job Object, with per-instance
+  nodename/cookie/ports/data-dir all passed as explicit environment variables (never inherited,
+  never on the command line), and waits for `rabbitmqctl await_startup` before reporting success
+  (a real boot-readiness signal, not port occupancy — a deliberate, better substitute for "the
+  management API" this entry originally proposed, since enabling the management plugin would be
+  extra scope with no readiness benefit over `await_startup`). `stop` tries a graceful
+  `rabbitmqctl stop` first (honoring `StopInstanceCommand.graceful`, the first real use of that
+  field in this codebase) and falls back to `Job.terminate()` if that doesn't exit the process in
+  time.
+- **Port convention** (documented, not encoded in `provider-api`, per D2):
+  `StartInstanceCommand.requestedPorts()` must contain exactly two values — the lower becomes the
+  AMQP port, the higher the Erlang distribution port.
+
+**Verified for real** (`RabbitMqBinaryProvisionerTest`, `RabbitMqRuntimeProviderTest` — 7 tests,
+reusing the spike's cached binaries so they don't re-download ~250MB): checksum-mismatch rejection
+and zip-slip rejection against a real local HTTP server and real zips; a full start→healthCheck→
+graceful-stop cycle against a real spawned node; **two simultaneous real nodes, stopping one, and
+confirming both the other node and EPMD survive — this time through the adapter's own Job Object,
+not the spike's plain `Start-Process`**, which is the actual scenario `EpmdSupervisor` exists to
+get right; a fully Turkish-character data/log directory end to end.
+
+**A real bug found while testing, not simulated:** the first attempt failed every real spawn with
+"No PATH variable (!)" — `rabbitmqctl`/`rabbitmq-server.bat` need ordinary Windows tools on `PATH`
+that this codebase's "never inherit the ambient environment" rule (docs/SECURITY.md) had stripped
+out entirely. Fixed via `RabbitMqEnvironment`, an explicit allow-list (`PATH`, `PATHEXT`,
+`USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP`, `ComSpec`, `SystemRoot`) — the same pattern
+`CorporateNetworkEnvironment` already uses in `adapter-fe-pipeline`, independently rediscovered here
+because adapters don't share code across modules (see docs/REPO_LAYOUT.md's dependency direction).
+A second real bug, in the test infrastructure itself: `HttpResponse.BodyHandlers.ofFile(path,
+CREATE, TRUNCATE_EXISTING)` silently defaults to a read-only channel open without an explicit
+`WRITE` option (per `Files.newByteChannel`'s own contract — `CREATE` requires `WRITE`/`APPEND` to
+have any effect), throwing `NoSuchFileException` for a file that was never going to be created.
+
+**Not done — deliberately deferred, not an oversight:** the adapter is not wired as a Spring bean in
+`app-bootstrap`. Doing so today would mean either (a) provisioning ~250MB eagerly at every app
+startup on a fresh machine, which is a real behavior/cost regression worth its own decision, or (b)
+some kind of lazy/on-demand provisioning trigger that doesn't exist yet since WP5's workspace UI can
+only create `adapter-dummy-runtime`-backed instances — there is no "pick a runtime kind" UI or
+per-kind provider dispatch mechanism today (the current wiring is "exactly one `RuntimeProvider`
+bean," per WP5's `AdapterConfig`). Wiring this in is real, scoped follow-up work, not a gap in the
+adapter itself.
+
+**Acceptance:** two simultaneous instances under a non-ASCII (Turkish) profile path — met; stopping
+one disturbs neither the other nor a pre-existing/EPMD-owning-job scenario — met; "app crash leaves
+no orphaned Erlang VM" is a property of `KILL_ON_JOB_CLOSE` already proven generically by WP1's
+`WindowsJobObjectSmokeTest`, not re-tested RabbitMQ-specifically (killing this test JVM mid-test to
+prove it would mean sacrificing the very process running the test suite).
 
 ---
 

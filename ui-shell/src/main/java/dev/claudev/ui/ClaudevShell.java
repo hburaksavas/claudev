@@ -119,6 +119,7 @@ public class ClaudevShell extends Application {
         GridPane grid = grid();
         addCheck(grid, 0, "SecretStore (DPAPI)", snapshot.secretStore());
         addCheck(grid, 1, "Windows Job Object", snapshot.jobObject());
+        addCheck(grid, 2, "Reconciler dry run", snapshot.reconciler());
         return grid;
     }
 

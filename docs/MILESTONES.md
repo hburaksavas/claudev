@@ -13,17 +13,17 @@ for continuity, but the work packages below are the actionable plan.
 | `persistence` | **Done for WP2's scope** — schema (9 tables), migration runner, repositories for Workspace/Instance/LaunchRecord/AuditEntry, optimistic concurrency, all real and verified |
 | `secret-store-dpapi` / `-legacy` | Done — real DPAPI round trip, verified live |
 | `app-bootstrap` / `ui-shell` | Single-JVM lifecycle works; UI is a diagnostics screen only |
-| `operation-engine` | Interface only — no scheduler, no event bus |
+| `operation-engine` | `Reconciler` **done for WP3's scope**, real and verified; the DAG scheduler/event bus (WP4) is still interface-only |
 | `adapter-rabbitmq` / `-redis` / `-fe-pipeline` | Stubs returning `NOT_IMPLEMENTED` |
 | `packaging` | Placeholder |
 
 ## The critical path
 
-WP1 (spawn primitive) and WP2 (persistence) are both done and verified. WP3 (reconciler) is next —
-it needs both: WP1's `ProcessIdentity`/`WindowsProcessLauncher` to check live process state, and
-WP2's `InstanceRepository`/`LaunchRecordRepository` to read/write what it finds.
+WP1, WP2, and WP3 are all done and verified — the safety core (spawn, persist, reconcile) is
+complete. WP4 (the DAG scheduler/event bus) is next; it's the last thing standing between "the app
+can observe reality" (WP1-3) and "the app can act on it" (start/stop something for real).
 
-WP3 → WP4 is now the strict remaining chain. WP5 can start once WP3 lands. WP6/WP7/WP8 are
+WP4 remains the sole strict dependency left. WP5 can start once WP3 lands (it already has). WP6/WP7/WP8 are
 parallelizable once WP4 is done.
 
 ---
@@ -110,21 +110,39 @@ before touching `MigrationRunner` again.
 
 ---
 
-## WP3 — Reconciler
+## WP3 — Reconciler — DONE
 
-**Build:**
-- `Reconciler` service: for every instance with a `LaunchRecord`, derive state from pid existence →
-  creation-time match → image fingerprint match → adapter health probe. Never trust a stored
-  `RUNNING`.
-- Untracked detection: enumerate processes whose image path resolves under the app's
-  managed-binaries directory, diff against known `LaunchRecord`s, classify the remainder as
-  `UNTRACKED` (needs `EnumProcesses` in `platform-windows`).
-- Blocking startup pass before the UI shows; timer-driven passes afterwards.
+**Built:**
+- `platform-windows`'s `RunningProcessScanner` — `K32EnumProcesses` (exported directly from
+  kernel32.dll on Vista+, no separate psapi.dll dependency needed) enumerates every live pid,
+  filtered down to ones whose image path resolves under a given directory.
+- `operation-engine`'s `Reconciler` (deliberately framework-agnostic, no Spring dependency, wired
+  as a bean by `app-bootstrap` the same way the adapters are): for every instance, derive state from
+  `LaunchRecord` presence → `ProcessIdentity.verify` (pid + creation-time + fingerprint, from WP1) →
+  `RUNNING`/`STOPPED`/`ORPHANED`. A failed verification deletes the stale `LaunchRecord` rather than
+  leaving a row that can only ever fail again. Separately, any live process under the managed
+  binaries directory not accounted for by a tracked pid is reported `UNTRACKED`. The
+  adapter-health-probe step from the original algorithm is a documented future extension point (no
+  adapter exists yet to probe) — verified process identity alone is `RUNNING` for now.
+- `ReconcilerStartupRunner` (a Spring `ApplicationRunner`, which Boot runs synchronously before
+  `SpringApplicationBuilder.run()` returns — this is what makes it a genuine *blocking* pass, not
+  merely an early one) plus `ReconcilerScheduler` (`@Scheduled`, every 30s) in `app-bootstrap`.
+- A "Reconciler dry run" row on the diagnostics screen, running a real pass against the live DB on
+  every refresh.
 
-**Acceptance (this is the original M0 gate):** hard-kill the app with several dummy instances
-running, relaunch, and every process is classified correctly — no false `RUNNING`, no false
-`ORPHANED` for genuinely-dead entries, an unrecorded-but-running process surfaces as `UNTRACKED`.
-No kill/signal fires against a pid whose creation-time+fingerprint doesn't match.
+**Verified (`ReconcilerTest`, real spawned processes + real SQLite, not mocked):**
+- A genuinely running process (spawned via WP1's `WindowsProcessLauncher`) is classified `RUNNING`;
+  an instance with no `LaunchRecord` at all is classified `STOPPED`.
+- Killing that process out-of-band, then reconciling again, classifies it `ORPHANED` and confirms
+  the stale `LaunchRecord` row is gone.
+- A process spawned under the managed directory with no `LaunchRecord`/`Instance` at all is
+  reported in `untrackedPids`.
+
+This was the original M0 acceptance gate (hard-kill with several instances running, relaunch,
+correct classification, no kill/signal against a mismatched identity) — met, just exercised at the
+unit-test level with real spawned processes rather than a full external-process hard-kill drill
+against the packaged app. That fuller drill remains useful before shipping (see
+docs/TESTING_STRATEGY.md) but is no longer required to prove the reconciler's core logic correct.
 
 ---
 

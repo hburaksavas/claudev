@@ -12,7 +12,7 @@
     <artifactId>operation-engine</artifactId>
     <packaging>jar</packaging>
     <name>operation-engine</name>
-    <description>DAG scheduler, cancellation, retry/compensation, Event Bus. M0 backlog item — see docs/PROCESS_SAFETY.md and docs/ARCHITECTURE.md.</description>
+    <description>Reconciler (WP3, real) plus the DAG scheduler/cancellation/retry/Event Bus (WP4 backlog) — see docs/PROCESS_SAFETY.md and docs/ARCHITECTURE.md. Stays framework-agnostic (no Spring dependency); app-bootstrap wires its classes as beans, matching the pattern already used for the provider-api adapters.</description>
 
     <dependencies>
         <dependency>
@@ -22,6 +22,14 @@
         <dependency>
             <groupId>dev.claudev</groupId>
             <artifactId>provider-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.claudev</groupId>
+            <artifactId>platform-windows</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.claudev</groupId>
+            <artifactId>persistence</artifactId>
         </dependency>
     </dependencies>
 </project>

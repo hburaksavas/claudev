@@ -1,5 +1,7 @@
 package dev.claudev.app;
 
+import dev.claudev.engine.Reconciler;
+import dev.claudev.engine.ReconciliationReport;
 import dev.claudev.platform.windows.WindowsJobObject;
 import dev.claudev.provider.AdapterManifest;
 import dev.claudev.provider.Capability;
@@ -36,6 +38,7 @@ public class SpringDiagnosticsSource implements DiagnosticsSource {
     private final RuntimeProvider runtimeProvider;
     private final ConnectionProvider connectionProvider;
     private final ProjectPipelineProvider pipelineProvider;
+    private final Reconciler reconciler;
     private final String dbPath;
 
     public SpringDiagnosticsSource(
@@ -44,12 +47,14 @@ public class SpringDiagnosticsSource implements DiagnosticsSource {
             RuntimeProvider runtimeProvider,
             ConnectionProvider connectionProvider,
             ProjectPipelineProvider pipelineProvider,
+            Reconciler reconciler,
             @Value("${claudev.db-path:${user.home}/.claudev/claudev.db}") String dbPath) {
         this.dataSource = dataSource;
         this.secretStore = secretStore;
         this.runtimeProvider = runtimeProvider;
         this.connectionProvider = connectionProvider;
         this.pipelineProvider = pipelineProvider;
+        this.reconciler = reconciler;
         this.dbPath = dbPath;
     }
 
@@ -68,6 +73,7 @@ public class SpringDiagnosticsSource implements DiagnosticsSource {
                 busyTimeout,
                 checkSecretStore(),
                 checkJobObject(),
+                checkReconciler(),
                 adapterRows());
     }
 
@@ -102,6 +108,18 @@ public class SpringDiagnosticsSource implements DiagnosticsSource {
     private DiagnosticsSnapshot.CheckResult checkJobObject() {
         try (WindowsJobObject job = WindowsJobObject.createWithKillOnClose("claudev-diagnostics-" + UUID.randomUUID())) {
             return DiagnosticsSnapshot.CheckResult.pass("KILL_ON_JOB_CLOSE job created and closed");
+        } catch (RuntimeException e) {
+            return DiagnosticsSnapshot.CheckResult.fail(e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    private DiagnosticsSnapshot.CheckResult checkReconciler() {
+        try {
+            ReconciliationReport report = reconciler.reconcile();
+            return DiagnosticsSnapshot.CheckResult.pass(String.format(
+                    "%d running, %d stopped, %d orphaned, %d untracked (live pass against the real DB)",
+                    report.running().size(), report.stopped().size(), report.orphaned().size(),
+                    report.untrackedPids().size()));
         } catch (RuntimeException e) {
             return DiagnosticsSnapshot.CheckResult.fail(e.getClass().getSimpleName() + ": " + e.getMessage());
         }

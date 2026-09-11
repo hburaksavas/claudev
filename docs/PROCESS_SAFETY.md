@@ -61,7 +61,10 @@ STOPPED | STARTING | RUNNING | DEGRADED | STOPPING | ORPHANED | UNKNOWN | UNTRAC
 ```
 
 Runs at app startup — mandatory, blocking the UI until the first pass completes — and on a timer
-thereafter. A stored `RUNNING` status is never trusted at face value.
+thereafter. A stored `RUNNING` status is never trusted at face value. Implemented and verified in
+`operation-engine`'s `Reconciler` (real spawned processes, real SQLite — see
+[MILESTONES.md](MILESTONES.md) WP3); `ORPHANED`/`UNKNOWN` are both live today, `UNTRACKED` is
+detected via `platform-windows`'s `RunningProcessScanner`.
 
 ## Managed-process lifetime
 

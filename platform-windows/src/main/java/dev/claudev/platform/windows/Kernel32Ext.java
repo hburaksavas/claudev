@@ -103,6 +103,15 @@ final class Kernel32Ext {
         boolean GetExitCodeProcess(HANDLE hProcess, int[] lpExitCode);
 
         int WaitForSingleObject(HANDLE hHandle, int dwMilliseconds);
+
+        /**
+         * {@code cb} is the caller-supplied buffer capacity in bytes; {@code lpcbNeeded} receives
+         * the number of bytes actually written. A caller must grow and retry if the returned count
+         * equals the buffer's capacity — the list may have been truncated. Exported directly from
+         * kernel32.dll on Vista+ (the "K32" psapi-equivalent functions), so no separate psapi.dll
+         * dependency is needed.
+         */
+        boolean K32EnumProcesses(int[] processIds, int cb, int[] lpcbNeeded);
     }
 
     /** _STARTUPINFOW, WinBase.h — only the fields this module ever sets are named beyond padding needs. */

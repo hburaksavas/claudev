@@ -6,6 +6,7 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Single-JVM entry point (D6, D15): the Spring context (domain services, operation engine,
@@ -18,8 +19,14 @@ import org.springframework.context.ConfigurableApplicationContext;
  * {@code dev.claudev.app} base package) because {@code @Configuration}/{@code @Component} beans
  * live across module packages (e.g. {@code dev.claudev.persistence.PersistenceConfig}), not just
  * under this class's own package.
+ *
+ * <p>{@code @EnableScheduling} backs {@link ReconcilerScheduler}'s timer-driven passes; the
+ * mandatory blocking startup pass itself doesn't need it — {@link ReconcilerStartupRunner} runs as
+ * an {@code ApplicationRunner}, which Spring Boot already executes synchronously before
+ * {@code run(args)} below returns.
  */
 @SpringBootApplication(scanBasePackages = "dev.claudev")
+@EnableScheduling
 public class ClaudevApplication {
 
     private static volatile ConfigurableApplicationContext springContext;

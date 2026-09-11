@@ -11,8 +11,9 @@ provider-api           RuntimeProvider / ConnectionProvider / ProjectPipelinePro
                        SecretStore interfaces, their DTOs, ProviderError, ProviderResult,
                        AdapterManifest. No dependency on domain-core (see PLUGIN_CONTRACT.md).
 
-operation-engine       DAG scheduler, cancellation, retry/compensation, Event Bus.
-                       Depends on: domain-core, provider-api. [interface-only stub]
+operation-engine       Reconciler (real, tested against real spawned processes + real SQLite).
+                       DAG scheduler, cancellation, retry/compensation, Event Bus. [stub, WP4]
+                       Depends on: domain-core, provider-api, platform-windows, persistence.
 
 platform-windows       JNA Win32 bindings: Job Objects, CreateProcessW-suspended spawn, argv
                        quoting, explicit environment blocks, pid+creation-time+SHA-256 identity

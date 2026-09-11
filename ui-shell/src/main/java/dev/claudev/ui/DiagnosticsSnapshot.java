@@ -17,6 +17,7 @@ public record DiagnosticsSnapshot(
         String busyTimeout,
         CheckResult secretStore,
         CheckResult jobObject,
+        CheckResult reconciler,
         List<AdapterRow> adapters
 ) {
     public DiagnosticsSnapshot {

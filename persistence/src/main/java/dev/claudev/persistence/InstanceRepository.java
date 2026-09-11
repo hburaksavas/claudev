@@ -83,6 +83,11 @@ public class InstanceRepository {
                 .findFirst();
     }
 
+    /** Every instance across every workspace — what the reconciler's startup/timer pass sweeps over (docs/PROCESS_SAFETY.md). */
+    public List<Versioned<Instance>> findAll() {
+        return jdbcTemplate.query("SELECT * FROM instance", (rs, rowNum) -> mapRow(rs));
+    }
+
     public List<Versioned<Instance>> findByWorkspaceId(WorkspaceId workspaceId) {
         return jdbcTemplate.query(
                 "SELECT * FROM instance WHERE workspace_id = ?",

@@ -24,6 +24,7 @@ public interface DiagnosticsSource {
                 "-",
                 DiagnosticsSnapshot.CheckResult.fail("no backend wired"),
                 DiagnosticsSnapshot.CheckResult.fail("no backend wired"),
+                DiagnosticsSnapshot.CheckResult.fail("no backend wired"),
                 List.of());
     }
 }

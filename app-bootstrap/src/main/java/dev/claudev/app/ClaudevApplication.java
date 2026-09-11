@@ -38,6 +38,7 @@ public class ClaudevApplication {
 
         ClaudevShell.setOnQuitRequested(ClaudevApplication::gracefulShutdown);
         ClaudevShell.setDiagnosticsSource(springContext.getBean(dev.claudev.ui.DiagnosticsSource.class));
+        ClaudevShell.setWorkspaceControlPort(springContext.getBean(dev.claudev.ui.WorkspaceControlPort.class));
 
         // Blocks until ClaudevShell.quit() calls Platform.exit().
         Application.launch(ClaudevShell.class, args);

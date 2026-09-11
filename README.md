@@ -23,10 +23,13 @@ schema, migration runner, and repositories with optimistic concurrency; `operati
 `Reconciler` and `InMemoryOperationEngine` (a real cancellable DAG scheduler with a persisted
 event stream) tie it all together and run for real on every startup; `adapter-fe-pipeline`
 implements the full step catalog (Git, Maven, config patching, deploy, health checks, the
-`ExecStep` escape hatch), tested against a real public git repo and a real local Maven build — see
-[docs/MILESTONES.md](docs/MILESTONES.md) WP1-WP4 and WP8, all done. `adapter-rabbitmq`,
-`adapter-redis`, and `ui-shell`'s workspace views are still stubs/not built; MILESTONES.md has the
-full plan.
+`ExecStep` escape hatch), tested against a real public git repo and a real local Maven build;
+`ui-shell` now has a workspace tab — create/delete workspaces and dummy instances, start/stop them
+as real operations against a real spawned process (`adapter-dummy-runtime`), a live operation event
+log, and a system tray icon — see [docs/MILESTONES.md](docs/MILESTONES.md) WP1-WP5 and WP8, all
+done. `adapter-rabbitmq` and `adapter-redis` are still stubs; MILESTONES.md has the full plan and
+WP5's two honestly-deferred items (the D13 "not encrypted" badge, and a faster externally-killed-
+instance detection path than the existing 30s reconciler timer).
 
 ## Quick start
 

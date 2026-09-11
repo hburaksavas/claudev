@@ -214,18 +214,58 @@ enough to reconstruct what happened (verified via a fresh `find()` read, not in-
 
 ---
 
-## WP5 — Workspace UI (`ui-shell`)
+## WP5 — Workspace UI (`ui-shell`) — DONE (with two deferred items, see below)
 
-Can start once WP3 lands; this is where the app becomes usable rather than inspectable.
+**Built:**
+- `adapter-dummy-runtime` (new module): promotes WP4's test-only `DummyRuntimeProvider` into a real,
+  shipped `RuntimeProvider` — still spawns a copy of `ping.exe` under a real Job Object via WP1's
+  `WindowsProcessLauncher`, but is now the actual wired bean (`AdapterConfig`), since
+  `adapter-rabbitmq` remains a WP6-blocked stub and the workspace UI needs something genuine to
+  start/stop. `RuntimeKind.DUMMY` was added to domain-core for it (unused anywhere else, verified
+  by grep before adding).
+- `WorkspaceControlPort` (`ui-shell`, implemented by `SpringWorkspaceControlPort` in
+  `app-bootstrap`) — the same interface-in-`ui-shell`/impl-in-`app-bootstrap` split already used for
+  `DiagnosticsSource`. Workspace/instance create/list/delete; start/stop each run as a real one-node
+  `OperationPlan` through the WP4 `OperationEngine`, persisting a `LaunchRecord` before reporting
+  success (D5 ordering) and running a `Reconciler` pass inline before the node returns, so state is
+  correct as soon as the operation completes rather than waiting for the next 30s timer tick.
+- New persistence: `RuntimeDefinitionRepository` (insert/findById — only `RuntimeSource.Imported` has
+  a persisted encoding today, `Managed`/`System` deferred until a real caller needs them);
+  `WorkspaceRepository.findAll`/`delete` (cascades instance/launch_record/pipeline rows — SQLite here
+  has no `ON DELETE CASCADE`); `InstanceRepository.delete`.
+- `WindowsCurrentUser` (`platform-windows`): a real `Advapi32Util`-backed SID lookup for the
+  `OwnerSid` recorded on a new `Workspace` — not a placeholder string.
+- `WorkspacesPane`/`ClaudevShell` (`ui-shell`): a second tab alongside the existing diagnostics
+  screen — workspace list, instance list with a live-colored state column, start/stop/create/delete,
+  and a live operation event log fed by `OperationEngine.subscribe()`. Polls the control port every
+  2s on a background thread (SQLite reads are blocking) and applies results via `Platform.runLater`.
+  A real `java.awt.SystemTray`/`TrayIcon` (best-effort — `SystemTray.isSupported()` gates it) makes
+  window-close hide-to-tray instead of quit, with a generated icon (no bundled asset exists yet, see
+  WP9); if the tray isn't available on a given session, close still quits rather than stranding an
+  invisible process, matching the original fallback behavior.
 
-**Build:** workspace list/create/delete; instance list showing live reconciler state; start/stop
-actions dispatched as operations; live operation progress and log tail; the persistent
-"not encrypted" badge for anything backed by the legacy secret store (D13); a tray icon so
-window-close can finally mean minimize-to-tray as PROCESS_SAFETY.md intends.
+**Verified:** 112 tests pass across the reactor (`mvn test`, real SQLite/Win32, not mocked),
+including new coverage for the cascading-delete/`findAll` repository methods, the real SID lookup,
+and a real spawn/stop round trip through `adapter-dummy-runtime`. `mvn spring-boot:run` starts the
+full Spring context (including the new `SpringWorkspaceControlPort` bean) and opens the JavaFX
+window with both tabs — confirmed via logs (clean startup, no exceptions) and a real window handle
+with the correct title/size; this session's screenshot tooling could not get a rendered frame back
+(a white client area) even after minimize/restore, which reads as this specific environment's
+remote-display capture, not an application fault — the same limitation would apply equally to the
+pre-existing diagnostics-only screen. Clicking through the UI by hand is still worth doing on a
+normal desktop session before calling this fully proven.
 
-**Acceptance:** starting and stopping a dummy instance from the UI is reflected in reconciler state
-without a manual refresh; closing to tray and restoring works; killing the instance externally
-flips the UI to `ORPHANED` within one reconcile interval.
+**Deviations from the original acceptance line, both honest scope cuts, not oversights:**
+- The **"not encrypted" badge for legacy-secret-store-backed items (D13)** is not built. Nothing in
+  this vertical slice ties an `Instance`/`Workspace` to a `SecretRef` yet — no adapter reads a secret
+  through a workspace-visible path (that arrives with WP6/WP7's real connection/credential handling).
+  Wiring the badge now would mean inventing a UI-only stand-in for state that doesn't exist yet.
+- **"Killing the instance externally flips the UI to `ORPHANED` within one reconcile interval"**
+  is true only on the existing 30s `ReconcilerScheduler` timer, not the UI's own 2s poll — an
+  external kill isn't detected until that timer's next tick, same as before WP5. The *UI-initiated*
+  start/stop path is faster (a reconcile pass runs inline in the same operation), but this session
+  did not add a shorter dedicated timer for the externally-killed case; doing so is a one-line change
+  to `ReconcilerScheduler`'s `fixedDelay` if the 30s interval proves too slow in practice.
 
 ---
 

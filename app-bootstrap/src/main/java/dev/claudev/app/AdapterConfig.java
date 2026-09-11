@@ -1,7 +1,7 @@
 package dev.claudev.app;
 
+import dev.claudev.adapter.dummy.DummyRuntimeProvider;
 import dev.claudev.adapter.fepipeline.FePipelineProvider;
-import dev.claudev.adapter.rabbitmq.RabbitMqRuntimeProvider;
 import dev.claudev.adapter.redis.RedisConnectionProvider;
 import dev.claudev.provider.connection.ConnectionProvider;
 import dev.claudev.provider.pipeline.ProjectPipelineProvider;
@@ -21,9 +21,16 @@ import org.springframework.context.annotation.Primary;
 @Configuration
 public class AdapterConfig {
 
+    /**
+     * {@code adapter-rabbitmq} is still a stub (WP6 is blocked on the Spike A feasibility run — see
+     * docs/RABBITMQ_RUNTIME.md), so the {@link RuntimeProvider} wired here is the real, spawns-an-
+     * actual-process {@code adapter-dummy-runtime} instead — otherwise WP5's workspace UI would have
+     * nothing genuine to start/stop against. Swap this back to {@code RabbitMqRuntimeProvider} once
+     * WP6 lands; see docs/MILESTONES.md WP5.
+     */
     @Bean
-    public RuntimeProvider rabbitMqRuntimeProvider() {
-        return new RabbitMqRuntimeProvider();
+    public RuntimeProvider dummyRuntimeProvider() {
+        return new DummyRuntimeProvider();
     }
 
     @Bean

@@ -22,6 +22,7 @@
         <module>adapter-rabbitmq</module>
         <module>adapter-redis</module>
         <module>adapter-fe-pipeline</module>
+        <module>adapter-dummy-runtime</module>
         <module>ui-shell</module>
         <module>app-bootstrap</module>
         <module>packaging</module>
@@ -103,6 +104,11 @@
             <dependency>
                 <groupId>dev.claudev</groupId>
                 <artifactId>adapter-fe-pipeline</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.claudev</groupId>
+                <artifactId>adapter-dummy-runtime</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

@@ -36,7 +36,7 @@ From the repo root (`claudev/`, where the parent `pom.xml` lives):
 mvn compile
 ```
 
-Builds all 13 modules in dependency order. A clean checkout's first build will download Spring
+Builds all 14 modules in dependency order. A clean checkout's first build will download Spring
 Boot's dependency BOM, JavaFX (`win` classifier), JNA, Lettuce, sqlite-jdbc, JUnit 5, Mockito, and
 AssertJ from Maven Central — expect that first run to take longer.
 
@@ -132,7 +132,7 @@ run; a plausible-looking but untested packaging config would be worse than an ho
 
 ## Finding your way around
 
-- [REPO_LAYOUT.md](REPO_LAYOUT.md) — what each of the 13 modules is for and the dependency graph.
+- [REPO_LAYOUT.md](REPO_LAYOUT.md) — what each of the 14 modules is for and the dependency graph.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the layering and why the DTO boundary discipline exists.
 - [MILESTONES.md](MILESTONES.md) — the backlog, in order, with acceptance gates.
 - [adr/](adr/) — why each hard-to-reverse decision was made, and what was rejected.

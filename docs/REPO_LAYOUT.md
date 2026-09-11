@@ -54,7 +54,16 @@ adapter-fe-pipeline    ProjectPipelineProvider: the full step catalog (EnsureChe
                        local Maven build, not mocked.
                        Depends on: provider-api, platform-windows.
 
-ui-shell               JavaFX views/ViewModels; calls the application layer in-process.
+adapter-dummy-runtime  RuntimeProvider that spawns a real, trivial, long-lived process under a Job
+                       Object — not RabbitMQ/Redis, but real, wired as the active RuntimeProvider
+                       bean while adapter-rabbitmq/adapter-redis remain stubs (WP5, see
+                       MILESTONES.md). Swap back to adapter-rabbitmq once WP6 lands.
+                       Depends on: provider-api, platform-windows.
+
+ui-shell               JavaFX views/ViewModels; calls the application layer in-process. Two tabs:
+                       diagnostics (WP0) and workspaces (WP5) — workspace/instance CRUD, start/stop
+                       dispatched as real operations, a live operation event log, and a system tray
+                       icon for minimize-to-tray.
                        Depends on: domain-core, provider-api, operation-engine, javafx-*.
 
 app-bootstrap           Spring Boot main() + JavaFX Application entry point; single-JVM

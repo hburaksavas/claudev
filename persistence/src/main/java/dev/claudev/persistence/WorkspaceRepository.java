@@ -53,6 +53,21 @@ public class WorkspaceRepository {
         return new Versioned<>(workspace, expectedRevision + 1);
     }
 
+    public List<Versioned<Workspace>> findAll() {
+        return jdbcTemplate.query("SELECT * FROM workspace", (rs, rowNum) -> mapRowWithoutChildren(rs));
+    }
+
+    /** Cascades to the workspace's instances/launch records/pipelines first — SQLite here has no ON DELETE CASCADE (V1__initial_schema.sql). */
+    public void delete(WorkspaceId id) {
+        String workspaceId = id.value().toString();
+        jdbcTemplate.update(
+                "DELETE FROM launch_record WHERE instance_id IN (SELECT id FROM instance WHERE workspace_id = ?)",
+                workspaceId);
+        jdbcTemplate.update("DELETE FROM instance WHERE workspace_id = ?", workspaceId);
+        jdbcTemplate.update("DELETE FROM pipeline WHERE workspace_id = ?", workspaceId);
+        jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
+    }
+
     public Optional<Versioned<Workspace>> findById(WorkspaceId id) {
         List<Versioned<Workspace>> rows = jdbcTemplate.query(
                 "SELECT * FROM workspace WHERE id = ?",

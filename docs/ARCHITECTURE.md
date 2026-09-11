@@ -11,7 +11,7 @@ Application layer: Operation Engine (DAG scheduler, cancellation,
   → provider-api ports: RuntimeProvider, ConnectionProvider,
     ProjectPipelineProvider, SecretStore (owned serde-friendly DTOs only)
   → adapters: adapter-rabbitmq, adapter-redis, adapter-fe-pipeline,
-    secret-store-dpapi, secret-store-legacy
+    adapter-dummy-runtime, secret-store-dpapi, secret-store-legacy
   → platform-windows: JNA Win32 bindings (Job Objects, process handles)
   → persistence: SQLite (WAL), filesystem (logs/artifacts/config)
 ```

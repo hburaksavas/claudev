@@ -9,6 +9,8 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.layout.GridPane;
@@ -18,21 +20,34 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
+import java.awt.AWTException;
+import java.awt.Image;
+import java.awt.MenuItem;
+import java.awt.PopupMenu;
+import java.awt.SystemTray;
+import java.awt.TrayIcon;
+import java.awt.image.BufferedImage;
+
 /**
  * The JavaFX half of the single-JVM lifecycle (D6, D15): {@code app-bootstrap} starts the Spring
  * context first, then launches this {@link Application} against the already-running context.
  *
- * <p>The current screen is a diagnostics view — it shows only things the application can actually
- * verify right now (live SQLite pragmas, a real DPAPI round trip, a real Job Object creation, and
- * the compiled-in adapter manifests). Workspace/instance views arrive with the M0/M1 backlog; this
- * screen deliberately shows real state rather than mock workspaces.
+ * <p>Two tabs: a diagnostics view (live SQLite pragmas, a real DPAPI round trip, a real Job Object
+ * creation, compiled-in adapter manifests) and, as of WP5, a workspace view that lists/creates/
+ * deletes workspaces and dummy instances and starts/stops them as real operations against a real
+ * spawned process — see {@link WorkspacesPane} and docs/MILESTONES.md WP5.
  */
 public class ClaudevShell extends Application {
 
     private static volatile Runnable onQuitRequested = () -> { };
     private static volatile DiagnosticsSource diagnosticsSource = DiagnosticsSource.unavailable();
+    private static volatile WorkspaceControlPort workspaceControlPort = WorkspaceControlPort.unavailable();
+    private static volatile ClaudevShell activeInstance;
 
     private final VBox sections = new VBox(18);
+    private WorkspacesPane workspacesPane;
+    private Stage primaryStage;
+    private TrayIcon trayIcon;
 
     /** app-bootstrap wires this to "run the operation engine's graceful Stop All, then settle." */
     public static void setOnQuitRequested(Runnable handler) {
@@ -43,16 +58,22 @@ public class ClaudevShell extends Application {
         diagnosticsSource = source == null ? DiagnosticsSource.unavailable() : source;
     }
 
+    public static void setWorkspaceControlPort(WorkspaceControlPort port) {
+        workspaceControlPort = port == null ? WorkspaceControlPort.unavailable() : port;
+    }
+
     @Override
     public void start(Stage primaryStage) {
+        this.primaryStage = primaryStage;
+        activeInstance = this;
         Platform.setImplicitExit(false);
 
         Label title = new Label("claudev");
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold;");
-        Label subtitle = new Label("dev workspace orchestrator — diagnostics");
+        Label subtitle = new Label("dev workspace orchestrator");
         subtitle.setStyle("-fx-text-fill: #666;");
 
-        Button refresh = new Button("Refresh");
+        Button refresh = new Button("Refresh diagnostics");
         refresh.setOnAction(event -> render());
 
         Button quit = new Button("Quit");
@@ -67,20 +88,79 @@ public class ClaudevShell extends Application {
         header.setStyle("-fx-background-color: #f0f0f2; -fx-border-color: transparent transparent #d8d8dc transparent; -fx-border-width: 0 0 1 0;");
 
         sections.setPadding(new Insets(20));
-
-        VBox root = new VBox(header, sections);
         render();
 
+        workspacesPane = new WorkspacesPane(workspaceControlPort);
+
+        TabPane tabs = new TabPane(
+                new Tab("Workspaces", workspacesPane),
+                new Tab("Diagnostics", sections));
+        tabs.getTabs().forEach(tab -> tab.setClosable(false));
+
+        VBox root = new VBox(header, tabs);
+        VBox.setVgrow(tabs, Priority.ALWAYS);
+
         primaryStage.setTitle("claudev");
-        primaryStage.setScene(new Scene(root, 900, 620));
-        // No tray icon exists yet, so hiding on close would strand an invisible process with no way
-        // back (see docs/PROCESS_SAFETY.md — tray/minimize is the intended behavior once a tray
-        // icon exists). Until then, closing the window quits properly.
+        primaryStage.setScene(new Scene(root, 1000, 680));
+
+        setUpTray(primaryStage);
+
         primaryStage.setOnCloseRequest(event -> {
             event.consume();
-            quit();
+            if (trayIcon != null) {
+                primaryStage.hide();
+            } else {
+                // No tray icon available on this platform/session — hiding would strand an
+                // invisible process with no way back (docs/PROCESS_SAFETY.md), so quit instead.
+                quit();
+            }
         });
         primaryStage.show();
+    }
+
+    /**
+     * Best-effort: {@link SystemTray#isSupported()} is false on some CI/RDP sessions, in which case
+     * the window-close handler above falls back to a real quit rather than pretending tray/minimize
+     * works.
+     */
+    private void setUpTray(Stage stage) {
+        if (!SystemTray.isSupported()) {
+            return;
+        }
+        try {
+            PopupMenu menu = new PopupMenu();
+            MenuItem show = new MenuItem("Show claudev");
+            show.addActionListener(e -> Platform.runLater(() -> {
+                stage.show();
+                stage.toFront();
+            }));
+            MenuItem quitItem = new MenuItem("Quit");
+            quitItem.addActionListener(e -> Platform.runLater(ClaudevShell::quit));
+            menu.add(show);
+            menu.add(quitItem);
+
+            trayIcon = new TrayIcon(trayImage(), "claudev", menu);
+            trayIcon.setImageAutoSize(true);
+            trayIcon.addActionListener(e -> Platform.runLater(() -> {
+                stage.show();
+                stage.toFront();
+            }));
+            SystemTray.getSystemTray().add(trayIcon);
+        } catch (AWTException e) {
+            trayIcon = null;
+        }
+    }
+
+    /** A minimal generated icon — no bundled asset exists yet (see docs/MILESTONES.md WP9 packaging). */
+    private static Image trayImage() {
+        BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        var g = image.createGraphics();
+        g.setColor(new java.awt.Color(0x2f6fed));
+        g.fillOval(1, 1, 14, 14);
+        g.setColor(java.awt.Color.WHITE);
+        g.drawString("c", 5, 12);
+        g.dispose();
+        return image;
     }
 
     private void render() {
@@ -174,6 +254,15 @@ public class ClaudevShell extends Application {
 
     /** Runs the app's own graceful-shutdown hook, then exits the JVM. Never called implicitly. */
     public static void quit() {
+        ClaudevShell instance = activeInstance;
+        if (instance != null) {
+            if (instance.trayIcon != null) {
+                SystemTray.getSystemTray().remove(instance.trayIcon);
+            }
+            if (instance.workspacesPane != null) {
+                instance.workspacesPane.shutdown();
+            }
+        }
         onQuitRequested.run();
         Platform.exit();
     }

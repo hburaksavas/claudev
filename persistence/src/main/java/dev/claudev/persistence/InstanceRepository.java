@@ -95,6 +95,11 @@ public class InstanceRepository {
                 workspaceId.value().toString());
     }
 
+    /** Callers must have already stopped/removed any launch_record for this instance — this does not cascade (see WorkspaceRepository#delete, which does). */
+    public void delete(InstanceId id) {
+        jdbcTemplate.update("DELETE FROM instance WHERE id = ?", id.value().toString());
+    }
+
     private Versioned<Instance> mapRow(ResultSet rs) throws SQLException {
         Instance instance = new Instance(
                 new InstanceId(UUID.fromString(rs.getString("id"))),

@@ -32,11 +32,17 @@ public class PersistenceConfig {
             Files.createDirectories(path.getParent());
         }
 
-        DriverManagerDataSource dataSource = new DriverManagerDataSource("jdbc:sqlite:" + path);
-        dataSource.setDriverClassName("org.sqlite.JDBC");
+        DriverManagerDataSource driverDataSource = new DriverManagerDataSource("jdbc:sqlite:" + path);
+        driverDataSource.setDriverClassName("org.sqlite.JDBC");
+
+        // Pragmas must be applied per connection, not once here — busy_timeout and foreign_keys
+        // are per-connection settings (see PragmaAppliedDataSource).
+        DataSource dataSource = new PragmaAppliedDataSource(driverDataSource, new SqlitePragmaConfigurer(5000));
 
         try (Connection connection = dataSource.getConnection()) {
-            new SqlitePragmaConfigurer(5000).apply(connection);
+            if (!connection.isValid(5)) {
+                throw new IllegalStateException("SQLite connection is not valid: " + path);
+            }
         }
 
         return dataSource;

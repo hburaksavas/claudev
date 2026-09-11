@@ -2,7 +2,7 @@
 
 ## SQLite, WAL mode
 
-`SqlitePragmaConfigurer` (in `persistence`, real and test-verified) applies on every connection:
+`SqlitePragmaConfigurer` (in `persistence`, real and test-verified) applies these to a connection:
 
 ```sql
 PRAGMA journal_mode=WAL;
@@ -14,6 +14,15 @@ WAL + a tuned `busy_timeout` exist specifically because real-time AV scanning of
 expected, not-fully-eliminable source of transient lock contention on Windows — see Spike C in
 [RISK_REGISTER.md](RISK_REGISTER.md). The exact `busy_timeout` value should be set from that
 spike's measured contention, not guessed.
+
+**Per-connection, not once at startup.** `journal_mode=WAL` is stored in the database file and
+survives across connections, but `busy_timeout` and `foreign_keys` are per-connection settings
+that revert to the driver's defaults on every new connection. `PragmaAppliedDataSource` wraps the
+underlying `DataSource` and applies the pragmas to every connection it hands out. This is not a
+theoretical concern: the first run of the real application showed `busy_timeout=3000` (the
+sqlite-jdbc default) in the diagnostics view while the code "configured" 5000 at startup — WAL read
+back correctly, so the misconfiguration was invisible until the value was displayed.
+`PragmaAppliedDataSourceTest` is the regression test.
 
 ## What lives where
 

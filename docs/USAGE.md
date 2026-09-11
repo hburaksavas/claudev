@@ -85,8 +85,19 @@ mvn spring-boot:run
 
 This starts the Spring context (`ClaudevApplication.main`) — including the `persistence` module's
 `PersistenceConfig`, which opens a real SQLite file under `~/.claudev/claudev.db` and applies the
-WAL/busy_timeout pragmas — then launches the JavaFX window (`ClaudevShell`) against it. Today that
-window shows only a placeholder label, since `ui-shell` has no real views yet.
+WAL/busy_timeout pragmas — then launches the JavaFX window (`ClaudevShell`) against it.
+
+The window shows a **diagnostics view**: runtime versions, the live SQLite database path with its
+actual `journal_mode`/`busy_timeout` read back over a real connection, a live DPAPI
+encrypt/decrypt round trip, a live Windows Job Object creation check, and the compiled-in adapter
+manifests with their declared status. Every value is measured at render time — "Refresh" re-runs
+all of it. Workspace/instance views arrive with the M0/M1 backlog; this screen deliberately shows
+verifiable state instead of mock workspaces.
+
+"Quit" (and closing the window) shuts the application down properly. Note that
+[PROCESS_SAFETY.md](PROCESS_SAFETY.md) specifies window-close as tray/minimize — that behavior is
+intentionally *not* wired up yet, because there is no tray icon to restore the window from, and
+hiding it would strand an invisible process with no way back.
 
 Equivalent two-step alternative (build a runnable jar, then run it):
 

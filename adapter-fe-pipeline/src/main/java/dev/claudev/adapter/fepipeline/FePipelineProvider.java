@@ -23,7 +23,7 @@ public final class FePipelineProvider implements ProjectPipelineProvider {
     public AdapterManifest manifest() {
         return new AdapterManifest(
                 "adapter-fe-pipeline", "0.1.0",
-                List.of(new Capability("pipeline", "fe")),
+                List.of(new Capability("pipeline", "fe"), new Capability("status", "not-implemented")),
                 "{}");
     }
 

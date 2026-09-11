@@ -25,7 +25,7 @@ public final class RabbitMqRuntimeProvider implements RuntimeProvider {
     public AdapterManifest manifest() {
         return new AdapterManifest(
                 "adapter-rabbitmq", "0.1.0",
-                List.of(new Capability("runtime", "rabbitmq")),
+                List.of(new Capability("runtime", "rabbitmq"), new Capability("status", "not-implemented")),
                 "{}");
     }
 

@@ -24,7 +24,7 @@ public final class RedisConnectionProvider implements ConnectionProvider {
     public AdapterManifest manifest() {
         return new AdapterManifest(
                 "adapter-redis", "0.1.0",
-                List.of(new Capability("connection", "redis")),
+                List.of(new Capability("connection", "redis"), new Capability("status", "not-implemented")),
                 "{}");
     }
 

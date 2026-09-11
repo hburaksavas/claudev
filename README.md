@@ -29,9 +29,12 @@ as real operations against a real spawned process (`adapter-dummy-runtime`), a l
 log, and a system tray icon; `adapter-rabbitmq` spawns and manages real RabbitMQ nodes (start/stop/
 health, two simultaneous nodes with EPMD survival, a Turkish-character data dir — all tested against
 real binaries, not mocked) and is wired in — the workspace UI can create and start real RabbitMQ
-instances, provisioning the pinned binaries lazily on first use rather than at app startup — see
-[docs/MILESTONES.md](docs/MILESTONES.md) WP1-WP6 and WP8, all done. `adapter-redis` is still a stub;
-MILESTONES.md has the full plan and
+instances, provisioning the pinned binaries lazily on first use rather than at app startup; `adapter-redis`
+really connects to a real Redis (Lettuce), with SCAN paging, single-key String/TTL mutations, and a
+real bulk-delete preview/commit flow — tested against a real Windows Redis build, never bundling
+one itself, per docs/REDIS_SCOPE.md — but Hash/List/Set/ZSet operations and any UI/authorization
+layer are not built. See [docs/MILESTONES.md](docs/MILESTONES.md) WP1-WP8, all done or honestly
+partial. MILESTONES.md has the full plan and
 WP5's two honestly-deferred items (the D13 "not encrypted" badge, and a faster externally-killed-
 instance detection path than the existing 30s reconciler timer).
 

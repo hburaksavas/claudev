@@ -49,7 +49,10 @@ adapter-rabbitmq       RuntimeProvider for the pinned RabbitMQ+Erlang pair (WP6)
                        lazily on first use rather than at every app startup.
                        Depends on: provider-api, platform-windows.
 
-adapter-redis          ConnectionProvider, connection-only, Lettuce client. [stub]
+adapter-redis          ConnectionProvider, connection-only (never manages a Redis binary — D8),
+                       Lettuce client (WP7) — connect/disconnect, SCAN, String and Key/TTL
+                       mutations, and a real bulk-DEL preview/commit flow are real and tested;
+                       Hash/List/Set/ZSet ops and any UI/authorization layer are not built yet.
                        Depends on: provider-api, lettuce-core.
 
 adapter-fe-pipeline    ProjectPipelineProvider: the full step catalog (EnsureCheckout..HealthCheck)

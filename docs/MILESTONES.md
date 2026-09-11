@@ -366,16 +366,68 @@ prove it would mean sacrificing the very process running the test suite).
 
 ---
 
-## WP7 — Redis adapter
+## WP7 — Redis adapter — PARTIALLY DONE (real, tested, honestly incomplete)
 
-**Build:** Lettuce-backed connections (remote + imported/system only); `environmentClass` gating
-with unset treated as production-restrictive; SCAN paging with the "possibly-incomplete live view"
-affordance; the typed edit set from [REDIS_SCOPE.md](REDIS_SCOPE.md); the authorization+audit gate
-on *every* mutation, plus `prepareMutation`/`commitMutation` for bulk/glob/flush-class operations.
+**A real architecture gap found before any adapter code, not an implementation detail:**
+`ConnectionProvider#scan`/`getString`/`authorizeMutation` all took a bare `connectionId` string
+with no host/port/credential anywhere in the interface — unlike `RuntimeProvider`, where every
+command DTO already carries what an adapter needs, there was no way for an implementation to know
+what to connect to. Fixed by adding an explicit `connect(ConnectOptions)`/`disconnect(connectionId)`
+lifecycle to the port — see
+[ADR-011](adr/ADR-011-connectionprovider-explicit-connect-lifecycle.md) for the decision and the
+rejected alternatives (passing connection details on every call; adapter-owned out-of-band config).
 
-**Acceptance:** a scripted single-key mutation against an unlocked-but-unclassified connection is
-refused by policy (not merely hidden in the UI); a glob delete without a completed token round trip
-is refused; the token is rejected when underlying data changed since preview, not only on expiry.
+**Built and verified for real** (`RedisConnectionProviderTest`, 10 tests, against a genuine Windows
+Redis 5.0.14.1 build — see "Sourcing" below, not mocked):
+- `connect`/`disconnect`: a real Lettuce `RedisClient`/`StatefulRedisConnection`, keyed by
+  `connectionId` in an internal map (same pattern as `RabbitMqRuntimeProvider`'s `instanceId ->
+  handle` map) — connecting to an unreachable host fails cleanly rather than hanging.
+- `getString`/`SCAN` paging (real cursor-based `SCAN`, not `KEYS` — the "possibly-incomplete live
+  view" property from [REDIS_SCOPE.md](REDIS_SCOPE.md) is real: keys inserted mid-scan are still
+  found by continuing to page).
+- The String and Key/TTL rows of the typed edit table: `SET`/`APPEND`/`DEL`/`EXPIRE`/`PERSIST`
+  through `authorizeMutation`, dispatched by an allow-list `switch` — anything not in it (tested
+  with `FLUSHALL`) is rejected, by construction, not by a UI-layer hint.
+  `EVAL`/`CONFIG`/`CLUSTER`/a raw console were never given a code path to reach in the first
+  place, matching the "excluded from V1" list, not merely omitted from a menu.
+- A real bulk pattern-`DEL` preview/commit flow: `prepareMutation` `SCAN`s with `MATCH` to compute
+  the exact matched key set and issues a token; `commitMutation` re-scans and rejects
+  (`ProviderError.Conflict`) if the matched set changed since preview — verified by a test that
+  inserts a new matching key between preview and commit and confirms the commit is refused, and a
+  second test confirming a token is single-use (a second `commitMutation` with the same token fails
+  because it's already been consumed, whether or not it "expired").
+- Every operation against a `connectionId` that was never `connect`ed returns `NotFound`, not a
+  null/empty/silent result.
+
+**Not built — a concrete, scoped gap, not a vague TODO:** Hash (`HGETALL`/`HSET`/`HDEL`), List
+(`LRANGE`/`LPUSH`/`RPUSH`/`LPOP`/`RPOP`), Set (`SMEMBERS`/`SADD`/`SREM`), and ZSet
+(`ZRANGE`/`ZRANGEBYSCORE`/`ZADD`/`ZREM`) are not implemented. `MutationRequest(connectionId,
+operation, key, value)` has no slot for a hash field or set/list member — `HSET` needs a field
+*and* a value, `LPUSH` needs to distinguish "push" from "the pushed value," etc. Packing that into
+the existing `value` string (e.g. `"field=value"`) was considered and rejected: it would be an
+undocumented, adapter-invented wire format outside `provider-api`'s DTO discipline (D2). The real
+fix is a second DTO shape (or a `field: Optional<String>` added to `MutationRequest`) — a small,
+concrete follow-up, not attempted in this pass since it touches the shared port interface a second
+time and deserves its own review rather than being folded in silently. `environmentClass`
+gating/audit-entry writing and any UI (connection creation, browsing, the mutation-confirmation
+flow) are also not built — this WP delivered the adapter's connection+read+partial-write engine,
+not the application layer around it (matching how WP6 separated "adapter built" from "wired into
+the UI").
+
+**Sourcing for testing, not production:** `adapter-redis` never downloads or manages a Redis binary
+— docs/REDIS_SCOPE.md's "no managed local Redis" rule is a real constraint honored here, not
+routed around. The real Redis server the tests run against is a genuine Windows build of upstream
+Redis 5.0.14.1 from the `tporadowski/redis` community fork (the same one referenced in
+REDIS_SCOPE.md as an example of what *not* to bundle), downloaded to `D:\dev\workspace\claudev-spike`
+purely as test infrastructure — exactly the same relationship `GitStepsIntegrationTest` has with a
+real public GitHub repo, not a step toward shipping it.
+
+**Acceptance (from the original entry, status per item):** "a scripted single-key mutation against
+an unlocked-but-unclassified connection is refused by policy" — not testable yet, no
+`environmentClass`/authorization-gate layer exists above `authorizeMutation` (the port method name
+is aspirational; today it just performs the operation). "A glob delete without a completed token
+round trip is refused" — met. "The token is rejected when underlying data changed since preview,
+not only on expiry" — met.
 
 ---
 

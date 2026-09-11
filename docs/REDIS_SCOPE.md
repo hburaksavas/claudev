@@ -1,5 +1,15 @@
 # Redis V1 Scope
 
+## Status: adapter partially built and verified — see docs/MILESTONES.md WP7
+
+`adapter-redis`'s `RedisConnectionProvider` really connects (Lettuce), and really implements the
+String and Key/TTL rows of the typed edit table below, `SCAN` paging, and a real bulk pattern-DEL
+preview/commit token flow with TOCTOU rejection — tested against a genuine Windows Redis 5.0.14.1
+build (`tporadowski/redis`, test-only infrastructure, never bundled — see "Sourcing" below). Hash/
+List/Set/ZSet operations are **not** built: `MutationRequest` has no field/member slot to address
+them with, and inventing an encoding (e.g. packing a field name into the `value` string) was judged
+worse than leaving them out — see MILESTONES.md for the exact, scoped follow-up.
+
 ## Sourcing (not managed, connection-only)
 
 V1 ships `imported`/`system`/remote connection sources only — point at a Redis the user already

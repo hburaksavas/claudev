@@ -17,6 +17,11 @@ public interface ConnectionProvider {
 
     AdapterManifest manifest();
 
+    /** See docs/adr/ADR-011-connectionprovider-explicit-connect-lifecycle.md. Must precede every other call for a given {@code connectionId}. */
+    ProviderResult<Ack> connect(ConnectOptions options);
+
+    ProviderResult<Ack> disconnect(String connectionId);
+
     ProviderResult<ScanPage> scan(String connectionId, String cursor, int pageSize);
 
     ProviderResult<String> getString(String connectionId, String key);

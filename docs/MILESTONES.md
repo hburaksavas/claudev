@@ -10,7 +10,7 @@ for continuity, but the work packages below are the actionable plan.
 | `domain-core` | Done — all aggregates as immutable records |
 | `provider-api` | Done — 4 ports, DTOs, `ProviderResult`/`ProviderError`, `AdapterManifest` |
 | `platform-windows` | **Done for WP1's scope** — Job Object create/assign/terminate/close, `CreateProcessW`-suspended spawn, argv quoting, explicit environment blocks, and pid+creation-time+fingerprint identity verification are all real and verified against live Win32 APIs |
-| `persistence` | **Partial** — real `DataSource` with per-connection WAL/busy_timeout pragmas; **no schema, no migrations, no repositories** |
+| `persistence` | **Done for WP2's scope** — schema (9 tables), migration runner, repositories for Workspace/Instance/LaunchRecord/AuditEntry, optimistic concurrency, all real and verified |
 | `secret-store-dpapi` / `-legacy` | Done — real DPAPI round trip, verified live |
 | `app-bootstrap` / `ui-shell` | Single-JVM lifecycle works; UI is a diagnostics screen only |
 | `operation-engine` | Interface only — no scheduler, no event bus |
@@ -19,12 +19,11 @@ for continuity, but the work packages below are the actionable plan.
 
 ## The critical path
 
-WP1 (spawning a process under a Job Object with verified identity) was the blocker for everything
-runtime-related, since the D5 ordering invariant is what makes every later "stop this instance"
-safe — it's now done and verified. WP2 (persistence) is next; nothing else is blocked on it,
-so it can proceed in parallel with early WP3/WP4 design if useful.
+WP1 (spawn primitive) and WP2 (persistence) are both done and verified. WP3 (reconciler) is next —
+it needs both: WP1's `ProcessIdentity`/`WindowsProcessLauncher` to check live process state, and
+WP2's `InstanceRepository`/`LaunchRecordRepository` to read/write what it finds.
 
-WP2 → WP3 → WP4 is now the strict chain. WP5 can start once WP3 lands. WP6/WP7/WP8 are
+WP3 → WP4 is now the strict remaining chain. WP5 can start once WP3 lands. WP6/WP7/WP8 are
 parallelizable once WP4 is done.
 
 ---
@@ -70,23 +69,44 @@ developer session. Tracked as open in the spike ledger.
 
 ---
 
-## WP2 — Schema, migrations, repositories (`persistence`)
+## WP2 — Schema, migrations, repositories (`persistence`) — DONE
 
-**Build:**
-- Migration runner (Flyway, or a small ordered-SQL runner — Flyway is the lower-risk default) and
-  the initial schema: `workspace`, `runtime_definition`, `instance`, `launch_record`, `connection`,
-  `pipeline`, `operation`, `operation_events`, `audit_entry`.
-- Repositories for `Workspace`, `Instance`, `LaunchRecord`, `AuditEntry` on `JdbcTemplate`.
-- Optimistic `revision` column on mutable aggregates; a stale write is rejected, never silently
-  overwritten.
-- `operation_events` and `audit_entry` are append-only (no update/delete paths in the repository
-  API at all — the absence of the method is the enforcement).
+**Built:**
+- `MigrationRunner` — a small, self-contained ordered-SQL runner, not Flyway: checked directly
+  against Maven Central first, and there is no `flyway-database-sqlite` artifact (nor any other
+  published Flyway module claiming SQLite support) — Flyway was never actually available here, not
+  merely heavier. Migrations are `V<version>__<description>.sql` classpath resources, applied in
+  order inside one transaction each, tracked in a `schema_version` table with a checksum that fails
+  loudly if an already-applied migration's content changes.
+- `V1__initial_schema.sql` — all nine tables (`workspace`, `runtime_definition`, `instance`,
+  `launch_record`, `connection`, `pipeline`, `operation`, `operation_events`, `audit_entry`).
+- `WorkspaceRepository`, `InstanceRepository`, `LaunchRecordRepository`, `AuditEntryRepository` on
+  plain `JdbcTemplate`. `Versioned<T>` carries the optimistic-concurrency revision *outside*
+  domain-core (revision is persistence infrastructure, not a domain concept, mirroring the
+  domain/DTO split in docs/PLUGIN_CONTRACT.md). `AuditEntryRepository` has no update/delete method
+  at all — enforcement by absence, not convention.
+- `PersistenceConfig` runs migrations as part of building the `DataSource` bean, so every other bean
+  that depends on it can assume the schema already exists.
 
-**Acceptance:**
-- Create a workspace + instance, restart the app, both load back identically.
-- A write with a stale revision fails with a conflict, and the winning row is unchanged.
-- `LaunchRecord` save is synchronous and returns only after commit — asserted by a test that
-  kills the JVM immediately after save and reads the row from a fresh connection.
+**Verified (real SQLite files on disk, not in-memory/mocked):**
+- `WorkspaceInstanceRoundTripTest` — write through one `DataSource`, read back through a second,
+  independently-opened `DataSource` against the same file (simulating "the app restarted" the way
+  that actually matters: nothing but the on-disk file carries the data across).
+- `WorkspaceOptimisticLockTest` — a second writer at a stale revision is rejected
+  (`OptimisticLockException`), and the row reflects only the winning writer's change.
+- `LaunchRecordDurabilityTest` — after `save()` returns, a completely separate `DriverManager`
+  connection (bypassing the repository/DataSource under test) already sees the row; a second save
+  atomically replaces the first via `INSERT OR REPLACE`, never accumulating history.
+- `MigrationRunnerTest` — schema applies once, is idempotent on rerun, and a tampered checksum is
+  rejected.
+
+**A real bug found and fixed along the way:** xerial sqlite-jdbc throws
+`"The prepared statement has been finalized"` when a comment-only SQL fragment reaches
+`Statement.execute()` — confirmed by isolated reproduction. The actual trigger was a semicolon
+*inside a migration file's own header comment*, which broke a naive split-on-`;` approach mid
+comment. Fixed by stripping `--` comments before splitting on semicolons, not by special-casing
+comment-only chunks after the fact. See docs/PERSISTENCE.md for the full account — worth reading
+before touching `MigrationRunner` again.
 
 ---
 

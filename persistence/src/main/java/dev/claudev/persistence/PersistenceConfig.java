@@ -13,14 +13,17 @@ import java.sql.Connection;
 import java.sql.SQLException;
 
 /**
- * Minimal M0 SQLite wiring: a single-file, user-space database under {@code ~/.claudev} (no admin
- * install path assumed), with {@link SqlitePragmaConfigurer}'s WAL/busy_timeout pragmas applied on
- * the first connection. Providing this bean makes Spring Boot's own {@code DataSourceAutoConfiguration}
+ * SQLite wiring: a single-file, user-space database under {@code ~/.claudev} (no admin install
+ * path assumed), with {@link SqlitePragmaConfigurer}'s WAL/busy_timeout pragmas applied on every
+ * connection and {@link MigrationRunner} bringing the schema up to date before the bean is
+ * returned — so every other bean that depends on this {@code DataSource} can assume the schema
+ * already exists. Providing this bean makes Spring Boot's own {@code DataSourceAutoConfiguration}
  * back off (it is {@code @ConditionalOnMissingBean(DataSource.class)}), so no
  * {@code spring.datasource.url} property is needed.
  *
- * <p>Not yet a pooled/production DataSource (see docs/PERSISTENCE.md) — schema/migrations and a
- * proper connection pool are still M0 backlog. This exists so the application actually starts.
+ * <p>Not yet a pooled/production DataSource (see docs/PERSISTENCE.md) — this is a plain
+ * {@code DriverManagerDataSource}, adequate for a single-process embedded database but not for
+ * meaningful concurrent load.
  */
 @Configuration
 public class PersistenceConfig {
@@ -44,6 +47,8 @@ public class PersistenceConfig {
                 throw new IllegalStateException("SQLite connection is not valid: " + path);
             }
         }
+
+        new MigrationRunner().migrate(dataSource);
 
         return dataSource;
     }

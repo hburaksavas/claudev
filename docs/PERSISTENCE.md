@@ -41,18 +41,55 @@ a stale write is rejected, not silently overwritten). Operation plans, once crea
 — an `Operation`'s `dag` does not change after submission; cancellation and status changes are
 new writes, not edits to the plan.
 
-## What exists today vs. what's still M0 backlog
+## What exists today vs. what's still backlog
 
-`PersistenceConfig` (in `persistence`) provides a real `DataSource` bean — a single SQLite file
-under `~/.claudev/claudev.db` (user-space, no admin path assumed), with
-`SqlitePragmaConfigurer`'s WAL/busy_timeout pragmas applied on the first connection. Supplying this
-bean makes Spring Boot's own `DataSourceAutoConfiguration` back off automatically
-(`@ConditionalOnMissingBean(DataSource.class)`), which is what lets `app-bootstrap` actually start —
-verified by running `spring-boot:run` for real, not just by a `@SpringBootTest`.
+`PersistenceConfig` provides a real `DataSource` bean — a single SQLite file under
+`~/.claudev/claudev.db` (user-space, no admin path assumed) — with `SqlitePragmaConfigurer`'s
+WAL/busy_timeout pragmas applied to *every* connection via `PragmaAppliedDataSource`, and
+`MigrationRunner` bringing the schema up to date before the bean is returned. Supplying the bean
+makes Spring Boot's own `DataSourceAutoConfiguration` back off automatically
+(`@ConditionalOnMissingBean(DataSource.class)`).
 
-Still missing: schema/migration tooling (Flyway or equivalent), a pooled/production-grade
-`DataSource` (the current one is a plain `DriverManagerDataSource`, fine for getting the app
-running but not for concurrent load), and the actual `workspace`/`instance`/`operation_events`/
-`audit_entries` tables. `ClaudevApplicationTests` still excludes `DataSourceAutoConfiguration` in
-its test properties — harmless now that a real bean exists (the exclusion is simply redundant
-there), but left in place to avoid an unrelated test-only change.
+**Migrations**: a small, self-contained ordered-SQL runner (`MigrationRunner`), not Flyway —
+checked directly against Maven Central before choosing: there is no `flyway-database-sqlite`
+artifact, and no other published Flyway module claims SQLite support. Migrations are classpath
+resources named `V<version>__<description>.sql` under `db/migration/`, applied in order inside one
+transaction each, tracked in a `schema_version` table with a checksum that fails the run loudly if
+an already-applied migration's content has changed.
+
+**Schema** (`V1__initial_schema.sql`): all nine tables from the architecture doc exist —
+`workspace`, `runtime_definition`, `instance`, `launch_record`, `connection`, `pipeline`,
+`operation`, `operation_events`, `audit_entry`. Polymorphic sub-structures (`RuntimeSource`,
+`RedisSafetyPolicy`, the pipeline step list) are stored as JSON text columns rather than normalized
+per-variant — a pragmatic choice for a single-writer embedded database.
+
+**Repositories** (`WorkspaceRepository`, `InstanceRepository`, `LaunchRecordRepository`,
+`AuditEntryRepository`, on plain `JdbcTemplate`) — the four this codebase's Build backlog called
+for; `connection`/`pipeline`/`operation` tables exist but have no repository yet, deferred to the
+milestone that actually needs them (WP4/WP7/WP8) rather than built speculatively now.
+
+**Optimistic concurrency**: `Versioned<T>` pairs a domain aggregate with its revision.
+Deliberately *not* a field on the domain-core records themselves — revision is persistence
+infrastructure, not a domain concept, the same separation `provider-api`'s DTOs already keep from
+domain types. `WorkspaceRepository.update`/`InstanceRepository.update` take an
+`expectedRevision` and throw `OptimisticLockException` on mismatch, leaving the stored row
+untouched.
+
+**Append-only tables**: `AuditEntryRepository` has no update/delete method — the enforcement is the
+absence of the method, not a documented convention.
+
+Still missing: a pooled/production-grade `DataSource` (the current one is a plain
+`DriverManagerDataSource`, fine for getting the app running but not for concurrent load), and
+repositories for the three tables noted above.
+
+### A real bug this surfaced
+
+Writing `MigrationRunner`'s statement-splitting hit a genuine xerial sqlite-jdbc driver bug:
+passing a comment-only SQL fragment (no actual statement, just `--` lines) to `Statement.execute()`
+throws `"The prepared statement has been finalized"` — confirmed by isolated reproduction, not
+guessed. The real trigger was subtler than "skip comment-only chunks," though: one of this file's
+own header comments contains a literal `;` ("...see docs/MILESTONES.md WP4/WP7/WP8); their
+tables..."), which a naive split-on-`;`-first approach breaks *in the middle of the comment*,
+concatenating its tail with the next real statement into something that's neither a valid comment
+nor valid SQL. The fix strips `--` comments from every line *before* splitting on semicolons, so a
+semicolon inside comment prose can never affect statement boundaries.

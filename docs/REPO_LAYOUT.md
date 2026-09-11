@@ -21,8 +21,11 @@ platform-windows       JNA Win32 bindings: Job Objects, CreateProcessW-suspended
                        place allowed to call CreateProcessW directly.
                        Depends on: jna, jna-platform.
 
-persistence            SQLite WAL/busy-timeout config (real, tested), migrations,
-                       audit/operation-event tables.
+persistence            SQLite WAL/busy-timeout config, a self-contained migration runner (not
+                       Flyway — no SQLite support exists there), the 9-table schema, and
+                       repositories for Workspace/Instance/LaunchRecord/AuditEntry with
+                       optimistic concurrency (all real, tested against real on-disk SQLite
+                       files). Connection/pipeline/operation repositories not built yet.
                        Depends on: domain-core, spring-boot-starter-jdbc, sqlite-jdbc.
 
 secret-store-dpapi     Default SecretStore: user-scoped DPAPI via JNA (real, tested).

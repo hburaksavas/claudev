@@ -20,9 +20,13 @@ operation-engine       Reconciler and the DAG scheduler/cancellation/Event Bus
 
 platform-windows       JNA Win32 bindings: Job Objects, CreateProcessW-suspended spawn, argv
                        quoting, explicit environment blocks, pid+creation-time+SHA-256 identity
-                       verification (all real, tested against live Win32 APIs). Every raw
-                       HANDLE the app touches lives here; WindowsProcessLauncher is the only
-                       place allowed to call CreateProcessW directly.
+                       verification, process enumeration (K32EnumProcesses), exit-code waiting
+                       (ProcessExitWaiter, with the same identity re-verification discipline —
+                       never wait on a pid without confirming it), and optional stdout/stderr
+                       file redirection for CLI-shaped spawns (all real, tested against live
+                       Win32 APIs). Every raw HANDLE the app touches lives here;
+                       WindowsProcessLauncher is the only place allowed to call CreateProcessW
+                       directly.
                        Depends on: jna, jna-platform.
 
 persistence            SQLite WAL/busy-timeout config, a self-contained migration runner (not
@@ -44,7 +48,10 @@ adapter-rabbitmq       RuntimeProvider for the pinned RabbitMQ+Erlang pair. [stu
 adapter-redis          ConnectionProvider, connection-only, Lettuce client. [stub]
                        Depends on: provider-api, lettuce-core.
 
-adapter-fe-pipeline    ProjectPipelineProvider: step catalog + ExecStep. [stub]
+adapter-fe-pipeline    ProjectPipelineProvider: the full step catalog (EnsureCheckout..HealthCheck)
+                       + ExecStep, real — tested against a real public git repo (real clone,
+                       fetch, blocked-on-dirty, blocked-on-diverged, real fast-forward) and a real
+                       local Maven build, not mocked.
                        Depends on: provider-api, platform-windows.
 
 ui-shell               JavaFX views/ViewModels; calls the application layer in-process.

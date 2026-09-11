@@ -38,8 +38,30 @@ approach proves not to work in practice (see [RISK_REGISTER.md](RISK_REGISTER.md
 
 **Because it's shelled out, the Git steps get exactly the same argv-array/no-shell-string
 discipline as `ExecStep`** — "it's a built-in step" is not an exemption from that rule. The
-absolute path to `git.exe` is validated once (centralized `validatePath`), and every argument is a
+absolute path to `git.exe` is validated once (`ExecutableLocator`), and every argument is a
 distinct array element, never concatenated into a command-line string.
+
+## `MavenBuild` is the one step that necessarily goes through `cmd.exe`
+
+`mvn.cmd` is a batch script — `CreateProcessW` cannot execute it directly, only `cmd.exe /c` can.
+`cmd.exe`'s own `/c` parsing has separate, harder-to-fully-neutralize metacharacter/`%`-expansion
+quirks than `CreateProcessW`'s argv rules (which WP1's `WindowsCommandLine` already handles
+adversarially-verified-safe). Rather than build a second bulletproof quoting layer for this one
+step type, `MavenBuildExecutor` validates every goal/phase against a strict allow-list pattern
+before it reaches `cmd.exe` at all, and never embeds the project directory in the command line (it
+is the spawn's working directory instead). See
+[adr/ADR-010-maven-goal-allowlist-not-cmd-quoting.md](adr/ADR-010-maven-goal-allowlist-not-cmd-quoting.md).
+
+## Status: implemented (`adapter-fe-pipeline`)
+
+Every step in the table above is real, not a stub — see docs/MILESTONES.md WP8. Notably:
+`GitFastForward` checks for a dirty worktree itself (`git status --porcelain`) before attempting
+anything, since `git merge --ff-only` alone can leave uncommitted changes intact rather than
+refusing outright; `AtomicDeploy`'s atomicity is per-rename, not a single OS transaction (see the
+class's own javadoc for the exact guarantee); `StartProcess` does not yet have anywhere to persist
+the `LaunchRecord`/`Instance` needed to manage the started service afterward — that's future work
+once FE-deployed services get their own tracked lifecycle, not a V1 gap this document should let
+slide by unstated.
 
 ## Corporate network reality
 

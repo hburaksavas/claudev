@@ -39,12 +39,25 @@ final class Kernel32Ext {
     static final int CREATE_NO_WINDOW = 0x08000000;
     static final int CREATE_UNICODE_ENVIRONMENT = 0x00000400;
 
+    /** STARTUPINFOW.dwFlags — WinBase.h; tells CreateProcessW to honor hStdInput/hStdOutput/hStdError. */
+    static final int STARTF_USESTDHANDLES = 0x00000100;
+
     /** GetExitCodeProcess sentinel meaning "still running" — WinBase.h. */
     static final int STILL_ACTIVE = 259;
 
     static final int WAIT_OBJECT_0 = 0x00000000;
     static final int WAIT_TIMEOUT = 0x00000102;
     static final int WAIT_FAILED = -1;
+
+    /** SYNCHRONIZE — WinNT.h; needed alongside PROCESS_QUERY_LIMITED_INFORMATION to WaitForSingleObject on a reopened process handle. */
+    static final int SYNCHRONIZE = 0x00100000;
+
+    /** CreateFileW dwDesiredAccess/dwShareMode/dwCreationDisposition/dwFlagsAndAttributes — WinBase.h/WinNT.h. */
+    static final int GENERIC_WRITE = 0x40000000;
+    static final int FILE_SHARE_READ = 0x00000001;
+    static final int CREATE_ALWAYS = 2;
+    static final int FILE_ATTRIBUTE_NORMAL = 0x80;
+    static final HANDLE INVALID_HANDLE_VALUE = new HANDLE(Pointer.createConstant(-1));
 
     interface Lib extends StdCallLibrary {
         Lib INSTANCE = Native.load("kernel32", Lib.class, W32APIOptions.DEFAULT_OPTIONS);
@@ -112,6 +125,23 @@ final class Kernel32Ext {
          * dependency is needed.
          */
         boolean K32EnumProcesses(int[] processIds, int cb, int[] lpcbNeeded);
+
+        HANDLE CreateFileW(
+                WString lpFileName, int dwDesiredAccess, int dwShareMode,
+                SecurityAttributes lpSecurityAttributes, int dwCreationDisposition,
+                int dwFlagsAndAttributes, HANDLE hTemplateFile);
+    }
+
+    /** _SECURITY_ATTRIBUTES, WinBase.h — {@code bInheritHandle} is the only reason this module needs one. */
+    public static class SecurityAttributes extends Structure {
+        public int nLength = size();
+        public Pointer lpSecurityDescriptor;
+        public boolean bInheritHandle;
+
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("nLength", "lpSecurityDescriptor", "bInheritHandle");
+        }
     }
 
     /** _STARTUPINFOW, WinBase.h — only the fields this module ever sets are named beyond padding needs. */

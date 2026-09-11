@@ -18,13 +18,15 @@ verified for real on this machine, not just compiled. `domain-core`, `provider-a
 `platform-windows`, `persistence`, `secret-store-dpapi`, and `secret-store-legacy` are real and
 test-verified **against live Win32/SQLite APIs**, not mocked. `platform-windows` implements the
 full spawn-under-a-Job-Object-with-verified-identity primitive (`WindowsProcessLauncher`,
-`ProcessIdentity`); `persistence` has a real schema, migration runner, and repositories with
-optimistic concurrency; `operation-engine`'s `Reconciler` and `InMemoryOperationEngine` (a real
-cancellable DAG scheduler with a persisted event stream) tie it all together and run for real on
-every startup — see [docs/MILESTONES.md](docs/MILESTONES.md) WP1-WP4, all done. The three runtime
-adapters (`adapter-rabbitmq`, `adapter-redis`, `adapter-fe-pipeline`) and `ui-shell`'s workspace
-views are still stubs/not built — everything needed to build them for real now exists;
-MILESTONES.md has the full plan.
+`ProcessIdentity`, plus exit-code waiting and stdout/stderr capture); `persistence` has a real
+schema, migration runner, and repositories with optimistic concurrency; `operation-engine`'s
+`Reconciler` and `InMemoryOperationEngine` (a real cancellable DAG scheduler with a persisted
+event stream) tie it all together and run for real on every startup; `adapter-fe-pipeline`
+implements the full step catalog (Git, Maven, config patching, deploy, health checks, the
+`ExecStep` escape hatch), tested against a real public git repo and a real local Maven build — see
+[docs/MILESTONES.md](docs/MILESTONES.md) WP1-WP4 and WP8, all done. `adapter-rabbitmq`,
+`adapter-redis`, and `ui-shell`'s workspace views are still stubs/not built; MILESTONES.md has the
+full plan.
 
 ## Quick start
 

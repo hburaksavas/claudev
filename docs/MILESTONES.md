@@ -9,24 +9,28 @@ for continuity, but the work packages below are the actionable plan.
 |---|---|
 | `domain-core` | Done — all aggregates as immutable records |
 | `provider-api` | Done — 4 ports, DTOs, `ProviderResult`/`ProviderError`, `AdapterManifest` |
-| `platform-windows` | **Done for WP1's scope** — Job Object create/assign/terminate/close, `CreateProcessW`-suspended spawn, argv quoting, explicit environment blocks, and pid+creation-time+fingerprint identity verification are all real and verified against live Win32 APIs |
+| `platform-windows` | **Done for WP1 + WP8's needs** — Job Object create/assign/terminate/close, `CreateProcessW`-suspended spawn, argv quoting, explicit environment blocks, pid+creation-time+fingerprint identity verification, process enumeration, exit-code waiting, and stdout/stderr redirection are all real and verified against live Win32 APIs |
 | `persistence` | **Done for WP2's scope** — schema (9 tables), migration runner, repositories for Workspace/Instance/LaunchRecord/AuditEntry, optimistic concurrency, all real and verified |
 | `secret-store-dpapi` / `-legacy` | Done — real DPAPI round trip, verified live |
 | `app-bootstrap` / `ui-shell` | Single-JVM lifecycle works; UI is a diagnostics screen only |
 | `operation-engine` | `Reconciler` and the DAG scheduler/event bus (`InMemoryOperationEngine`) **both done**, real and verified |
-| `adapter-rabbitmq` / `-redis` / `-fe-pipeline` | Stubs returning `NOT_IMPLEMENTED` |
+| `adapter-fe-pipeline` | **Done** — the full step catalog + `ExecStep`, real, tested against a real public git repo and a real local Maven build |
+| `adapter-rabbitmq` / `-redis` | Stubs returning `NOT_IMPLEMENTED` |
 | `packaging` | Placeholder |
 
 ## The critical path
 
-WP1-WP4 are all done and verified — the app can observe reality (spawn, persist, reconcile) *and*
-act on it (submit a real DAG of work, run it with bounded concurrency, cancel it, persist every
-event). What's left is entirely about *what* work gets scheduled and *how it's shown*, not the
-machinery to schedule and show it.
+WP1-WP4 (the safety core and the operation engine) and WP8 (the FE pipeline adapter) are all done
+and verified. The app can observe reality, act on it via a real DAG, *and* actually check out/build/
+deploy something for real.
 
-WP5 (workspace UI) and WP6/WP7/WP8 (the three real adapters) are all unblocked and independently
-parallelizable now — none of them are waiting on anything else in this list. WP9 (packaging) still
-waits on WP5-8 producing something worth packaging.
+WP5 (workspace UI) and WP6/WP7 (RabbitMQ, Redis) remain, both still unblocked and independently
+parallelizable — WP6 needs its own feasibility spike (RABBITMQ_RUNTIME.md) before committing to an
+implementation, WP7 has no such blocker but has no real Redis/Docker available in this environment
+to verify against for real, which is why WP8 (buildable/testable entirely with tools already on
+this machine — git, Maven, a local HTTP server) was picked up first, out of the original
+alphabetical-ish WP6/WP7/WP8 ordering. WP9 (packaging) still waits on WP5-7 producing something more
+worth packaging.
 
 ---
 
@@ -253,15 +257,77 @@ is refused; the token is rejected when underlying data changed since preview, no
 
 ---
 
-## WP8 — FE pipeline adapter
+## WP8 — FE pipeline adapter — DONE
 
-**Build:** the step catalog (`EnsureCheckout` … `HealthCheck`) on WP1's spawn/argv primitives;
-`ExecStep` with its allow-list and explicit env; `ConfigPatch` schema-validated substitution against
-declared files only; system proxy + corporate CA honored by the Git/Maven steps.
+Picked up ahead of WP6/WP7 because it's the one real adapter fully testable with tools already on
+this machine (git, Maven, a JDK-builtin HTTP server) — no Redis/Docker/RabbitMQ+Erlang available
+here, and WP6 has its own feasibility spike to run first regardless (see RABBITMQ_RUNTIME.md).
 
-**Acceptance:** a real pipeline run against a test Bitbucket repo and Maven project behind a
-proxy/CA; pre-execution argv is logged and inspectable; the WP1 adversarial argv suite is re-run
-through the actual Git/Maven step paths, not just the launcher.
+**Built:**
+- `adapter-fe-pipeline`: all ten steps from the catalog (`EnsureCheckout`, `GitFetch`,
+  `GitFastForward`, `MavenBuild`, `ConfigPatch`, `StageArtifact`, `AtomicDeploy`, `StartProcess`,
+  `HealthCheck`, `ExecStep`), dispatched by `FePipelineProvider` from a fixed registry —
+  sequential, fail-fast, never compiled per-project code.
+- `Params` — typed, clearly-failing extraction from a `StepInvocation`'s generic
+  `Map<String, Object>`, the closest V1 gets to "validated against a schema owned by the step
+  type" without a full JSON-schema layer.
+- `ExecutableLocator` — resolves `git.exe`/`mvn.cmd`/`cmd.exe` to a validated absolute path (PATH
+  search, or an env-var override for import/testing), never left to implicit PATH search at spawn
+  time.
+- `CliProcessRunner` — the shared spawn-wait-capture path every CLI-shaped step uses: WP1's
+  `WindowsProcessLauncher`, argv as a list, output captured to temp files so a failure message is
+  actually readable rather than just an exit code.
+- `CorporateNetworkEnvironment` — the explicit, named allow-list of environment variables forwarded
+  to Git/Maven spawns (proxy/CA vars per the corporate-network NFR, plus `JAVA_HOME` — a real gap
+  found while testing, see below). Nothing is inherited wholesale.
+- **New in `platform-windows`, built for this**: `ProcessExitWaiter` (waits for a spawned CLI
+  process to exit and returns its exit code, with the same pid+creation-time re-verification
+  discipline as everywhere else — never wait on an unverified pid); `LaunchSpec` gained optional
+  `stdoutFile`/`stderrFile` redirection (`CreateFileW` + inheritable `SECURITY_ATTRIBUTES` +
+  `STARTF_USESTDHANDLES`, opt-in, the pre-existing 6-arg constructor and its behavior are
+  unchanged for every existing caller).
+- `MavenGoalValidator` + [ADR-010](adr/ADR-010-maven-goal-allowlist-not-cmd-quoting.md): `mvn.cmd`
+  is a batch script and can only run via `cmd.exe /c`, which has its own, genuinely
+  hard-to-fully-neutralize metacharacter/`%`-expansion parsing separate from `CreateProcessW`'s
+  argv rules. Rather than build and adversarially test a second quoting layer, every goal/phase is
+  validated against a strict allow-list before it ever reaches `cmd.exe`.
+
+**Verified (real git.exe against a real public GitHub repo, a real local Maven build, a real local
+HTTP server — nothing mocked):**
+- Clone into a directory whose path contains a space (the same argv-quoting concern as always, now
+  through the actual Git step path, not just WP1's launcher in isolation); a second `EnsureCheckout`
+  call is a true no-op.
+- `GitFastForward` blocks on a dirty worktree (checked explicitly, before attempting anything) and
+  on a genuinely diverged local commit (`--ff-only` refuses); succeeds when actually behind the
+  remote, landing exactly on the remote's latest commit.
+- `MavenBuild` runs a real goal against a trivial project; a failing goal produces a
+  `StepExecutionException` whose message contains real captured Maven output; an unsafe goal string
+  is rejected before anything spawns.
+- `ExecStep` runs a real allow-listed executable (including one copied to a path with a space in
+  it), fails cleanly on a non-zero exit, and rejects a relative or nonexistent executable path
+  outright.
+- `HealthCheck` polls a real local server through initial failures to a real success, and correctly
+  times out against both a server that never turns healthy and nothing listening at all.
+- `FePipelineProviderTest`: a real two-step pipeline (checkout + stage) succeeds end to end; a
+  failing first step stops the pipeline before a later step ever runs; an unknown step type fails
+  without running anything.
+
+**A real bug found while testing, not guessed:** the first "real Maven build" test failed with
+`mvn.cmd`'s own `"JAVA_HOME environment variable is not defined correctly"` — because this
+codebase's spawns are deliberately fully explicit about environment (docs/SECURITY.md), and
+`JAVA_HOME` wasn't yet in the forwarded allow-list. Fixed by adding it (and `M2_HOME`/
+`MAVEN_HOME`/`MAVEN_OPTS`) to `CorporateNetworkEnvironment`; confirmed `PATH` itself was *not*
+also needed once `JAVA_HOME` was present, so it was deliberately left out rather than added
+"just in case."
+
+**Deviation from the original acceptance line, documented rather than silently substituted:** WP8
+was originally scoped as "a test Bitbucket repo and Maven project behind a proxy/CA." No Bitbucket
+instance or corporate proxy/CA exists to test against in this environment, so a small public
+GitHub repo (`octocat/Hello-World`) stands in for the real-repo requirement, and the proxy/CA
+forwarding exists in `CorporateNetworkEnvironment` but is **not yet verified against a real proxy**
+— tracked as open in docs/RISK_REGISTER.md. "Pre-execution argv is logged and inspectable" is also
+not yet built (no logging of the constructed argv before spawn) — a straightforward addition, not
+done here to keep this pass focused on the step logic itself being real and correct.
 
 ---
 

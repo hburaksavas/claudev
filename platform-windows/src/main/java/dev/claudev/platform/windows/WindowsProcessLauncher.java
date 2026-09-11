@@ -30,8 +30,12 @@ public final class WindowsProcessLauncher {
         Memory environment = WindowsEnvironmentBlock.encode(spec.environment());
 
         Kernel32Ext.StartupInfo startupInfo = new Kernel32Ext.StartupInfo();
-        startupInfo.write();
         Kernel32Ext.ProcessInformation processInfo = new Kernel32Ext.ProcessInformation();
+
+        boolean redirecting = spec.stdoutFile().isPresent() || spec.stderrFile().isPresent();
+        HANDLE stdinHandle = null;
+        HANDLE stdoutHandle = null;
+        HANDLE stderrHandle = null;
 
         int flags = Kernel32Ext.CREATE_SUSPENDED
                 | Kernel32Ext.CREATE_UNICODE_ENVIRONMENT
@@ -42,13 +46,33 @@ public final class WindowsProcessLauncher {
                 ? null
                 : new WString(spec.workingDirectory().toAbsolutePath().toString());
 
-        boolean created = Kernel32Ext.Lib.INSTANCE.CreateProcessW(
-                applicationName, commandLine, null, null, false, flags,
-                environment, workingDirectory, startupInfo, processInfo);
-        if (!created) {
-            throw new WindowsJobObject.WindowsApiException("CreateProcessW", Kernel32Ext.Lib.INSTANCE.GetLastError());
+        try {
+            if (redirecting) {
+                // STARTF_USESTDHANDLES requires all three to be valid together, so whichever of
+                // stdout/stderr wasn't asked for still gets a real (NUL) handle, and stdin is
+                // always NUL — a spawned CLI step must never be able to read this process's input.
+                stdinHandle = openForRead(NUL_DEVICE);
+                stdoutHandle = openForWrite(spec.stdoutFile().map(Path::toString).orElse(NUL_DEVICE));
+                stderrHandle = openForWrite(spec.stderrFile().map(Path::toString).orElse(NUL_DEVICE));
+                startupInfo.dwFlags |= Kernel32Ext.STARTF_USESTDHANDLES;
+                startupInfo.hStdInput = stdinHandle;
+                startupInfo.hStdOutput = stdoutHandle;
+                startupInfo.hStdError = stderrHandle;
+            }
+            startupInfo.write();
+
+            boolean created = Kernel32Ext.Lib.INSTANCE.CreateProcessW(
+                    applicationName, commandLine, null, null, redirecting, flags,
+                    environment, workingDirectory, startupInfo, processInfo);
+            if (!created) {
+                throw new WindowsJobObject.WindowsApiException("CreateProcessW", Kernel32Ext.Lib.INSTANCE.GetLastError());
+            }
+            processInfo.read();
+        } finally {
+            closeIfNotNull(stdinHandle);
+            closeIfNotNull(stdoutHandle);
+            closeIfNotNull(stderrHandle);
         }
-        processInfo.read();
 
         HANDLE processHandle = processInfo.hProcess;
         HANDLE threadHandle = processInfo.hThread;
@@ -90,6 +114,45 @@ public final class WindowsProcessLauncher {
         } finally {
             Kernel32Ext.Lib.INSTANCE.CloseHandle(threadHandle);
             Kernel32Ext.Lib.INSTANCE.CloseHandle(processHandle);
+        }
+    }
+
+    private static final String NUL_DEVICE = "NUL";
+
+    private static HANDLE openForWrite(String path) {
+        Kernel32Ext.SecurityAttributes inheritable = inheritableSecurityAttributes();
+        HANDLE handle = Kernel32Ext.Lib.INSTANCE.CreateFileW(
+                new WString(path), Kernel32Ext.GENERIC_WRITE, Kernel32Ext.FILE_SHARE_READ,
+                inheritable, Kernel32Ext.CREATE_ALWAYS, Kernel32Ext.FILE_ATTRIBUTE_NORMAL, null);
+        if (handle == null || Kernel32Ext.INVALID_HANDLE_VALUE.equals(handle)) {
+            throw new WindowsJobObject.WindowsApiException(
+                    "CreateFileW(" + path + ")", Kernel32Ext.Lib.INSTANCE.GetLastError());
+        }
+        return handle;
+    }
+
+    private static HANDLE openForRead(String path) {
+        Kernel32Ext.SecurityAttributes inheritable = inheritableSecurityAttributes();
+        HANDLE handle = Kernel32Ext.Lib.INSTANCE.CreateFileW(
+                new WString(path), 0x80000000 /* GENERIC_READ */, Kernel32Ext.FILE_SHARE_READ,
+                inheritable, 3 /* OPEN_EXISTING */, Kernel32Ext.FILE_ATTRIBUTE_NORMAL, null);
+        if (handle == null || Kernel32Ext.INVALID_HANDLE_VALUE.equals(handle)) {
+            throw new WindowsJobObject.WindowsApiException(
+                    "CreateFileW(" + path + ")", Kernel32Ext.Lib.INSTANCE.GetLastError());
+        }
+        return handle;
+    }
+
+    private static Kernel32Ext.SecurityAttributes inheritableSecurityAttributes() {
+        Kernel32Ext.SecurityAttributes attributes = new Kernel32Ext.SecurityAttributes();
+        attributes.bInheritHandle = true;
+        attributes.write();
+        return attributes;
+    }
+
+    private static void closeIfNotNull(HANDLE handle) {
+        if (handle != null) {
+            Kernel32Ext.Lib.INSTANCE.CloseHandle(handle);
         }
     }
 

@@ -19,10 +19,12 @@ verified for real on this machine, not just compiled. `domain-core`, `provider-a
 test-verified **against live Win32/SQLite APIs**, not mocked. `platform-windows` implements the
 full spawn-under-a-Job-Object-with-verified-identity primitive (`WindowsProcessLauncher`,
 `ProcessIdentity`); `persistence` has a real schema, migration runner, and repositories with
-optimistic concurrency; `operation-engine`'s `Reconciler` ties the two together and runs for real
-on every startup — see [docs/MILESTONES.md](docs/MILESTONES.md) WP1/WP2/WP3. The three runtime
-adapters (`adapter-rabbitmq`, `adapter-redis`, `adapter-fe-pipeline`), the DAG scheduler/event bus
-(WP4), and `ui-shell`'s workspace views are still stubs/not built; MILESTONES.md has the full plan.
+optimistic concurrency; `operation-engine`'s `Reconciler` and `InMemoryOperationEngine` (a real
+cancellable DAG scheduler with a persisted event stream) tie it all together and run for real on
+every startup — see [docs/MILESTONES.md](docs/MILESTONES.md) WP1-WP4, all done. The three runtime
+adapters (`adapter-rabbitmq`, `adapter-redis`, `adapter-fe-pipeline`) and `ui-shell`'s workspace
+views are still stubs/not built — everything needed to build them for real now exists;
+MILESTONES.md has the full plan.
 
 ## Quick start
 

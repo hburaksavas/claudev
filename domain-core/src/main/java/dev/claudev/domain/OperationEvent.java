@@ -19,6 +19,8 @@ public record OperationEvent(
         LOG_LINE,
         WARNING,
         FAILED,
-        COMPLETED
+        COMPLETED,
+        /** Never attempted because a dependency failed — the DAG scheduler's skip-propagation (D4/ADR-007). */
+        SKIPPED
     }
 }

@@ -27,5 +27,14 @@
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
         </dependency>
+        <!-- Version managed by the imported spring-boot-dependencies BOM. Used only to encode the
+             polymorphic sub-structures (OperationDag, targets list) as JSON text columns — see
+             V1__initial_schema.sql's own note on this pattern. Not used to (de)serialize
+             domain-core types directly; this module hand-maps to/from plain Map/List shapes so
+             domain-core stays free of any Jackson annotation coupling. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
     </dependencies>
 </project>

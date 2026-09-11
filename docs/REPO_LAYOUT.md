@@ -11,8 +11,11 @@ provider-api           RuntimeProvider / ConnectionProvider / ProjectPipelinePro
                        SecretStore interfaces, their DTOs, ProviderError, ProviderResult,
                        AdapterManifest. No dependency on domain-core (see PLUGIN_CONTRACT.md).
 
-operation-engine       Reconciler (real, tested against real spawned processes + real SQLite).
-                       DAG scheduler, cancellation, retry/compensation, Event Bus. [stub, WP4]
+operation-engine       Reconciler and the DAG scheduler/cancellation/Event Bus
+                       (InMemoryOperationEngine) — both real, tested against real spawned
+                       processes and real SQLite, not mocked. Retry policy/per-step timeout/
+                       compensation beyond "fail the node" are not built (no adapter needs them
+                       yet — WP6/7/8 will drive what's actually required).
                        Depends on: domain-core, provider-api, platform-windows, persistence.
 
 platform-windows       JNA Win32 bindings: Job Objects, CreateProcessW-suspended spawn, argv

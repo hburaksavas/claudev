@@ -84,8 +84,7 @@ class ReconcilerTest {
             assertThat(instanceRepository.findById(stoppedInstance.id()).orElseThrow().value().observedState())
                     .isEqualTo(InstanceState.STOPPED);
         } finally {
-            launch.job().terminate(1);
-            launch.job().close();
+            terminateAndAwaitExit(launch);
         }
     }
 
@@ -150,8 +149,7 @@ class ReconcilerTest {
 
             assertThat(report.untrackedPids()).contains(stray.pid());
         } finally {
-            stray.job().terminate(1);
-            stray.job().close();
+            terminateAndAwaitExit(stray);
         }
     }
 
@@ -166,6 +164,43 @@ class ReconcilerTest {
                 null, Map.of("SystemRoot", systemRoot.toString()),
                 "claudev-reconciler-test-" + UUID.randomUUID(), true);
         return WindowsProcessLauncher.launch(spec);
+    }
+
+    /**
+     * Terminating the job signals termination but does not itself wait for it, and even once the
+     * process is gone Windows can lag briefly before releasing its executable's file lock (the
+     * same AV/EDR-adjacent class of delay documented for writes in docs/PROCESS_SAFETY.md, just
+     * observed here on delete) — long enough to race JUnit's {@code @TempDir} cleanup, which runs
+     * immediately after the test method returns. Waiting for exit, then retry-deleting the
+     * specific file ourselves, is what makes that cleanup reliable instead of intermittently
+     * flaky.
+     */
+    private static void terminateAndAwaitExit(LaunchResult launch) {
+        ProcessHandle handle = ProcessHandle.of(launch.pid()).orElse(null);
+        launch.job().terminate(1);
+        launch.job().close();
+        if (handle != null) {
+            waitUntilNotAlive(handle, Duration.ofSeconds(10));
+        }
+        deleteWithRetry(Path.of(launch.imagePath()));
+    }
+
+    private static void deleteWithRetry(Path file) {
+        for (int attempt = 0; attempt < 20; attempt++) {
+            try {
+                Files.deleteIfExists(file);
+                return;
+            } catch (java.io.IOException e) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+        // Best effort: if still locked after ~2s, leave it — JUnit's own @TempDir cleanup will
+        // surface the failure clearly rather than this method masking it silently.
     }
 
     private static void waitUntilNotAlive(ProcessHandle handle, Duration timeout) {

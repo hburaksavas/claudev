@@ -1,5 +1,11 @@
 package dev.claudev.app;
 
+import dev.claudev.domain.Operation;
+import dev.claudev.domain.OperationId;
+import dev.claudev.domain.OperationStatus;
+import dev.claudev.engine.OperationEngine;
+import dev.claudev.engine.OperationNode;
+import dev.claudev.engine.OperationPlan;
 import dev.claudev.engine.Reconciler;
 import dev.claudev.engine.ReconciliationReport;
 import dev.claudev.platform.windows.WindowsJobObject;
@@ -22,6 +28,7 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -39,6 +46,7 @@ public class SpringDiagnosticsSource implements DiagnosticsSource {
     private final ConnectionProvider connectionProvider;
     private final ProjectPipelineProvider pipelineProvider;
     private final Reconciler reconciler;
+    private final OperationEngine operationEngine;
     private final String dbPath;
 
     public SpringDiagnosticsSource(
@@ -48,6 +56,7 @@ public class SpringDiagnosticsSource implements DiagnosticsSource {
             ConnectionProvider connectionProvider,
             ProjectPipelineProvider pipelineProvider,
             Reconciler reconciler,
+            OperationEngine operationEngine,
             @Value("${claudev.db-path:${user.home}/.claudev/claudev.db}") String dbPath) {
         this.dataSource = dataSource;
         this.secretStore = secretStore;
@@ -55,6 +64,7 @@ public class SpringDiagnosticsSource implements DiagnosticsSource {
         this.connectionProvider = connectionProvider;
         this.pipelineProvider = pipelineProvider;
         this.reconciler = reconciler;
+        this.operationEngine = operationEngine;
         this.dbPath = dbPath;
     }
 
@@ -74,6 +84,7 @@ public class SpringDiagnosticsSource implements DiagnosticsSource {
                 checkSecretStore(),
                 checkJobObject(),
                 checkReconciler(),
+                checkOperationEngine(),
                 adapterRows());
     }
 
@@ -123,6 +134,42 @@ public class SpringDiagnosticsSource implements DiagnosticsSource {
         } catch (RuntimeException e) {
             return DiagnosticsSnapshot.CheckResult.fail(e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    /** Submits a trivial real operation through the real engine and waits for it to persist a terminal status. */
+    private DiagnosticsSnapshot.CheckResult checkOperationEngine() {
+        try {
+            OperationPlan plan = new OperationPlan(
+                    "diagnostics-self-test", List.of(),
+                    List.of(new OperationNode("noop", List.of(), ctx -> { })));
+            OperationId operationId = operationEngine.submit(plan);
+
+            long deadline = System.currentTimeMillis() + 5000;
+            Optional<Operation> result = Optional.empty();
+            while (System.currentTimeMillis() < deadline) {
+                result = operationEngine.find(operationId);
+                if (result.isPresent() && isTerminal(result.get().status())) {
+                    break;
+                }
+                Thread.sleep(20);
+            }
+
+            if (result.isEmpty()) {
+                return DiagnosticsSnapshot.CheckResult.fail("operation not found after submit");
+            }
+            if (result.get().status() != OperationStatus.SUCCEEDED) {
+                return DiagnosticsSnapshot.CheckResult.fail("unexpected status: " + result.get().status());
+            }
+            return DiagnosticsSnapshot.CheckResult.pass(
+                    "submitted+completed operation " + operationId.value() + " (real DAG run, persisted)");
+        } catch (Exception e) {
+            return DiagnosticsSnapshot.CheckResult.fail(e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    private static boolean isTerminal(OperationStatus status) {
+        return status == OperationStatus.SUCCEEDED || status == OperationStatus.FAILED
+                || status == OperationStatus.PARTIALLY_FAILED || status == OperationStatus.CANCELLED;
     }
 
     private List<DiagnosticsSnapshot.AdapterRow> adapterRows() {

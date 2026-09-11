@@ -49,10 +49,12 @@ infers `Running` from a stored PID or an occupied port alone; see
 
 ## The Event Bus
 
-`OperationEvent`s (started, step-progress, log-line, warning, failed, completed) are one
-representation, not two hand-maintained copies: forwarded live to the JavaFX UI thread and
+`OperationEvent`s (started, step-progress, log-line, warning, failed, completed, skipped) are one
+representation, not two hand-maintained copies: forwarded live to `subscribe()`rs and
 appended to the append-only `operation_events` table for the audit trail and post-crash
-reconstruction.
+reconstruction. Implemented in `operation-engine`'s `InMemoryOperationEngine` (docs/MILESTONES.md
+WP4) — `subscribe()` is a live in-process callback for now, not yet wired to the JavaFX thread
+specifically, since `ui-shell` doesn't consume it yet (WP5).
 
 ## Component ownership at a glance
 

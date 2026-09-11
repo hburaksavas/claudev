@@ -13,18 +13,20 @@ for continuity, but the work packages below are the actionable plan.
 | `persistence` | **Done for WP2's scope** — schema (9 tables), migration runner, repositories for Workspace/Instance/LaunchRecord/AuditEntry, optimistic concurrency, all real and verified |
 | `secret-store-dpapi` / `-legacy` | Done — real DPAPI round trip, verified live |
 | `app-bootstrap` / `ui-shell` | Single-JVM lifecycle works; UI is a diagnostics screen only |
-| `operation-engine` | `Reconciler` **done for WP3's scope**, real and verified; the DAG scheduler/event bus (WP4) is still interface-only |
+| `operation-engine` | `Reconciler` and the DAG scheduler/event bus (`InMemoryOperationEngine`) **both done**, real and verified |
 | `adapter-rabbitmq` / `-redis` / `-fe-pipeline` | Stubs returning `NOT_IMPLEMENTED` |
 | `packaging` | Placeholder |
 
 ## The critical path
 
-WP1, WP2, and WP3 are all done and verified — the safety core (spawn, persist, reconcile) is
-complete. WP4 (the DAG scheduler/event bus) is next; it's the last thing standing between "the app
-can observe reality" (WP1-3) and "the app can act on it" (start/stop something for real).
+WP1-WP4 are all done and verified — the app can observe reality (spawn, persist, reconcile) *and*
+act on it (submit a real DAG of work, run it with bounded concurrency, cancel it, persist every
+event). What's left is entirely about *what* work gets scheduled and *how it's shown*, not the
+machinery to schedule and show it.
 
-WP4 remains the sole strict dependency left. WP5 can start once WP3 lands (it already has). WP6/WP7/WP8 are
-parallelizable once WP4 is done.
+WP5 (workspace UI) and WP6/WP7/WP8 (the three real adapters) are all unblocked and independently
+parallelizable now — none of them are waiting on anything else in this list. WP9 (packaging) still
+waits on WP5-8 producing something worth packaging.
 
 ---
 
@@ -146,22 +148,65 @@ docs/TESTING_STRATEGY.md) but is no longer required to prove the reconciler's co
 
 ---
 
-## WP4 — Operation engine
+## WP4 — Operation engine — DONE
 
-**Build:**
-- DAG scheduler with bounded concurrency; a failed node skips only its dependents; terminal status
-  `PARTIALLY_FAILED` with a structured per-node summary.
-- Cancellation propagation, per-step timeout, retry policy, compensation only where explicitly
-  declared safe.
-- Event bus: one `OperationEvent` stream, forwarded live to the UI *and* appended to
-  `operation_events` — same event, not two representations.
-- A `DummyRuntimeProvider` that spawns a trivial long-lived child via WP1, so WP1–WP4 can be
-  exercised end to end without RabbitMQ existing yet.
+**Built:**
+- `DagScheduler` (package-private — `OperationEngine`/`OperationPlan`/`OperationNode`/
+  `NodeAction`/`NodeExecutionContext` are the public surface, the algorithm itself is an
+  implementation detail): bounded concurrency via `ExecutorCompletionService`; a failed node's
+  *transitive* dependents are `SKIPPED` (BFS over the reverse dependency graph), unrelated branches
+  run to completion regardless; a dangling dependency or duplicate node id is rejected upfront
+  rather than discovered mid-run; a dependency cycle fails loudly (`FAILED`, with a clear message)
+  instead of hanging forever.
+- `NodeAction`/`NodeExecutionContext` — the executable half of a node lives in `operation-engine`
+  only, never in `domain-core`'s `OperationDag` (which stays pure structural data — id/dependsOn —
+  mirroring the domain/wire-DTO split already used for `provider-api`, D2).
+- `InMemoryOperationEngine` (the real `OperationEngine`): `submit` persists the plan and returns
+  immediately, running the DAG on a background thread — a deliberate redesign from the original
+  stub interface, which returned a fully-realized `Operation` synchronously and was incompatible
+  with meaningful cancellation. `cancel` is cooperative (checked via `NodeExecutionContext.isCancelled()`,
+  never a forced kill). Every emitted `OperationEvent` is both persisted
+  (`OperationEventRepository`, append-only, same enforcement-by-absence rule as `AuditEntryRepository`)
+  and pushed to live `subscribe()`rs — the same event, not two representations.
+- `OperationRepository`/`OperationEventRepository` (`persistence`): `dag`/`targets`/`kind` are
+  immutable once inserted; only `status`/`endedAt` are ever updated. Added `jackson-databind`
+  (version managed by the already-imported Spring Boot BOM) to encode the polymorphic `dag`/
+  `targets` fields as JSON text columns — hand-mapped to/from plain `Map`/`List` shapes rather than
+  letting Jackson reflect over the domain-core record directly, so domain-core stays free of any
+  Jackson coupling.
+- `DummyRuntimeProvider` (test-only): spawns a real, trivial, long-lived child via WP1's
+  `WindowsProcessLauncher`, so WP1-WP4 are exercised end to end through the actual
+  `RuntimeProvider` port shape, not just raw `NodeAction`s.
+- A "Reconciler dry run" companion — an "Operation engine self-test" row on the diagnostics screen,
+  submitting a real one-node operation through the real engine on every refresh.
 
-**Acceptance:** a DAG with one deliberately failing node reports `PARTIALLY_FAILED` listing exactly
-that node's dependents as skipped and unrelated branches as succeeded; cancelling mid-run stops
-pending nodes and leaves no orphaned process; the persisted event stream alone is enough to
-reconstruct what happened after a crash.
+**Verified (real spawned processes + real SQLite where it matters, not mocked):**
+- `DagSchedulerTest` (pure, fast, no I/O): linear-chain ordering; a failed node skips only its
+  transitive dependents while an unrelated branch still succeeds (→ `PARTIALLY_FAILED`); a plan
+  where *everything* fails is plain `FAILED`, not `PARTIALLY_FAILED`; cancelling mid-run (via a
+  blocked node + `CountDownLatch`) stops the pending dependent from ever starting; bounded
+  concurrency is never exceeded (measured with an `AtomicInteger` high-water mark); dangling
+  dependencies, duplicate ids, and cycles are all rejected/handled without hanging.
+- `InMemoryOperationEngineTest`: a plan with a real WP1 spawn node succeeds, and the persisted
+  event stream exactly matches what was published live to `subscribe()`; a `PARTIALLY_FAILED`
+  operation is fully reconstructable from `find()` — i.e. from the database alone, not leftover
+  in-memory state; cancelling a submitted operation after its first (real, spawned) node has
+  started stops the dependent node from ever running and leaves **no orphaned process** —
+  confirmed by directly checking the spawned pid is no longer alive.
+
+**A real bug found while writing the tests, not the production code:** two tests (and
+`DummyRuntimeProvider.stop`) spawned a copy of `ping.exe` into a `@TempDir`-managed directory,
+terminated it, and returned — racing JUnit's own directory cleanup against Windows still holding
+the executable's file lock briefly after the process was confirmed no longer alive (the same
+AV/EDR-adjacent delay class already documented for *writes* in docs/PROCESS_SAFETY.md, observed
+here on *delete*). Fixed by waiting for exit and then retry-deleting the specific file with
+backoff before the test method returns, rather than assuming "process not alive" means "file
+unlocked."
+
+**Acceptance criteria met:** a DAG with one deliberately failing node reports `PARTIALLY_FAILED`
+listing exactly that node's dependents as skipped and unrelated branches as succeeded; cancelling
+mid-run stops pending nodes and leaves no orphaned process; the persisted event stream alone is
+enough to reconstruct what happened (verified via a fresh `find()` read, not in-memory state).
 
 ---
 

@@ -120,6 +120,7 @@ public class ClaudevShell extends Application {
         addCheck(grid, 0, "SecretStore (DPAPI)", snapshot.secretStore());
         addCheck(grid, 1, "Windows Job Object", snapshot.jobObject());
         addCheck(grid, 2, "Reconciler dry run", snapshot.reconciler());
+        addCheck(grid, 3, "Operation engine self-test", snapshot.operationEngine());
         return grid;
     }
 

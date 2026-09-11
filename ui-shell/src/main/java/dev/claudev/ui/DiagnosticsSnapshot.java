@@ -18,6 +18,7 @@ public record DiagnosticsSnapshot(
         CheckResult secretStore,
         CheckResult jobObject,
         CheckResult reconciler,
+        CheckResult operationEngine,
         List<AdapterRow> adapters
 ) {
     public DiagnosticsSnapshot {

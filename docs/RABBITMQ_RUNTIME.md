@@ -27,17 +27,55 @@ instances are running. It must never be born inside, or killed with, a single in
 Object — stopping one RabbitMQ node must never disturb another node or a pre-existing external
 EPMD.
 
-## Release-blocking feasibility spike (not yet run)
+## Release-blocking feasibility spike — RUN, PASSED (2026-09-12)
 
-Before M2 can be attempted:
+All four criteria verified against real binaries on this dev machine (not simulated, not mocked):
+portable `otp_win64_27.3.4.17.zip` (Erlang/OTP 27.3.4.17 — **not** the newest OTP-29.0.6, which
+failed to boot RabbitMQ 4.3.5 at all, see below) and `rabbitmq-server-windows-4.3.5.zip`, both
+official GitHub-release zip distributions requiring no installer/no admin.
 
-- Two simultaneous managed nodes on one machine, distinct nodename/port/cookie/data-dir.
-- Safe single-node stop that doesn't disturb the other node.
-- Behavior when an external EPMD is already present on the machine.
-- Non-ASCII (e.g. Turkish) Windows user-profile paths.
+- **Two simultaneous managed nodes, distinct nodename/port/cookie/data-dir**: `spikeA@localhost`
+  (port 5673, dist port 25673, cookie `spike_cookie_A`) and `spikeB@localhost` (port 5674, dist
+  port 25674, cookie `spike_cookie_B`) both booted and ran concurrently (`rabbitmqctl status`
+  confirmed both). Every value came from an explicit environment block passed to
+  `rabbitmq-server.bat` (`ERLANG_HOME`, `RABBITMQ_BASE`, `RABBITMQ_NODENAME`, `RABBITMQ_NODE_PORT`,
+  `RABBITMQ_DIST_PORT`, `RABBITMQ_SERVER_START_ARGS=-setcookie ...`) — nothing inherited from a
+  shared `.erlang.cookie` or ambient shell state, matching the per-instance-isolation section above.
+- **Safe single-node stop**: `rabbitmqctl -n spikeA@localhost stop` (cookie passed via
+  `RABBITMQ_CTL_ERL_ARGS`) cleanly exited node A's OS process while node B's uptime kept
+  incrementing without interruption and EPMD's registry (`epmd -names`) dropped only `spikeA`.
+- **External/pre-existing EPMD**: after both A and B were stopped, `epmd.exe` (a separate,
+  unmanaged process — confirmed by PID) kept running on its own, exactly as
+  ["EPMD is not owned by any single instance"](#epmd-is-not-owned-by-any-single-instance) above
+  describes. A third node (`spikeC@localhost`) was then started against that already-running EPMD
+  and booted normally without EPMD being respawned (same PID before and after) — confirms the
+  "app starts into a machine that already has EPMD running" case is unremarkable, not a special
+  case to code around.
+- **Non-ASCII Windows path**: node A's entire `RABBITMQ_BASE` lived under a Turkish-character
+  directory (`...\örnek-çalışma-alanı\node-A`) — mnesia/feature-flags/log directories were all
+  created and written under it correctly, and the node booted, ran, and stopped cleanly. (The
+  *console* mirrored the path with mangled characters — a `chcp`/codepage display artifact in the
+  terminal used to launch it, not a file I/O problem; the actual on-disk paths and log file
+  contents were correct.)
 
-See [RISK_REGISTER.md](RISK_REGISTER.md) — "portable Rabbit+OTP clean-VM spike failure" is an
-explicit release blocker, not a nice-to-have.
+**A real, release-relevant finding, not a process note:** the newest available Erlang/OTP at spike
+time (OTP-29.0.6) **fails to boot RabbitMQ 4.3.5 outright** —
+`{incompatible_feature_flags,{horus,extraction_denied,...}}` during `Starting broker...`, i.e.
+RabbitMQ's `horus` abstract-code loader rejects OTP 29's newer bytecode. This is exactly why
+`RuntimeSource.Managed` pins an explicit `(version, erlangVersion)` **pair** rather than "whatever
+Erlang is newest" — confirmed necessary, not a defensive design that turned out unneeded. OTP
+27.3.4.17 is the version this spike verified as compatible with RabbitMQ 4.3.5; the actual pin
+(with a checksum from an authoritative source) is still an M1 exit criterion, not decided here —
+see the Licensing/checksum note below.
+
+**Spike binaries** (not committed — ~640MB) are on this machine at
+`D:\dev\workspace\claudev-spike` (`otp27\` and `rabbitmq\rabbitmq_server-4.3.5\`) for reuse by
+whoever picks up WP6's actual `adapter-rabbitmq` build, so it isn't re-downloaded from scratch.
+
+See [RISK_REGISTER.md](RISK_REGISTER.md) — the "portable Rabbit+OTP clean-VM spike failure" risk is
+now resolved for *this* machine; a true clean-VM (no dev tools, no existing Erlang/PATH state) run
+remains worth doing before shipping, since this spike ran on an already-JDK/Maven/git-equipped dev
+box, not a minimal user machine.
 
 ## Licensing
 

@@ -271,13 +271,29 @@ normal desktop session before calling this fully proven.
 
 ## WP6 — RabbitMQ adapter
 
-**Blocked on Spike A** (see [RABBITMQ_RUNTIME.md](RABBITMQ_RUNTIME.md)) — run the spike before
-committing to this design.
+**Spike A: DONE, passed (2026-09-12)** — see [RABBITMQ_RUNTIME.md](RABBITMQ_RUNTIME.md) for full
+results. All four criteria verified against real RabbitMQ 4.3.5 + Erlang/OTP 27.3.4.17 portable
+zips: two simultaneous nodes with independent nodename/port/cookie/data-dir; a graceful single-node
+stop that didn't disturb the other node's uptime or registration; a pre-existing/external EPMD that
+survived both managed nodes stopping and accepted a third node without being respawned; a fully
+Turkish-character data/log directory tree that booted, wrote, and stopped without issue. Also
+surfaced a real, release-relevant fact: the newest Erlang (OTP-29) cannot boot RabbitMQ 4.3.5 at
+all, which is exactly the failure mode `RuntimeSource.Managed`'s pinned-pair design exists to
+prevent. **Not yet done:** an equivalent run on a true clean/minimal VM (this spike ran on a dev
+box with existing JDK/Maven/git tooling already present) — worth one more pass before shipping, not
+a blocker to starting the build below. The adapter itself (the actual `adapter-rabbitmq` build) is
+**not started** — this entry only covers the spike that was blocking it.
 
-**Build:** pinned RabbitMQ+Erlang pair acquisition with checksum verification; per-instance
-nodename/ports/cookie/data-dir isolation via WP1's explicit environment block; EPMD as a
-ref-counted application-level dependency never owned by a single instance's job; readiness via the
-management API, not port occupancy.
+**Build (not started):** pinned RabbitMQ+Erlang pair acquisition with checksum verification;
+per-instance nodename/ports/cookie/data-dir isolation via WP1's explicit environment block (spike
+confirmed the exact env var set works: `ERLANG_HOME`, `RABBITMQ_BASE`, `RABBITMQ_NODENAME`,
+`RABBITMQ_NODE_PORT`, `RABBITMQ_DIST_PORT`, `RABBITMQ_SERVER_START_ARGS=-setcookie ...` for the
+server, `RABBITMQ_CTL_ERL_ARGS=-setcookie ...` for `rabbitmqctl`); EPMD as a ref-counted
+application-level dependency never owned by a single instance's job; readiness via the management
+API, not port occupancy; spawning through WP1's `WindowsProcessLauncher`/Job Object (the spike used
+`rabbitmq-server.bat` directly via `Start-Process`, not yet through the app's own launcher — that
+integration is part of this build, not proven by the spike). Spike binaries are cached at
+`D:\dev\workspace\claudev-spike` on this machine for reuse when this build starts.
 
 **Acceptance:** two simultaneous instances under a non-ASCII (Turkish) profile path; stopping one
 disturbs neither the other nor a pre-existing external EPMD; app crash leaves no orphaned Erlang VM.

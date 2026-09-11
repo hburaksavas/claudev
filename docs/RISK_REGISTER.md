@@ -2,7 +2,7 @@
 
 | Risk | Why it matters | Mitigation / status |
 |---|---|---|
-| RabbitMQ+Erlang portable pair fails on a clean, non-admin VM | M1 release blocker | Spike A: two simultaneous nodes, shared/external EPMD, ASCII + Turkish/non-ASCII paths, safe single-node stop. Not yet run. |
+| RabbitMQ+Erlang portable pair fails on a clean, non-admin VM | M1 release blocker | Spike A run 2026-09-12 on this dev machine, all four criteria passed (two simultaneous nodes, safe single-node stop, external/pre-existing EPMD, Turkish-path data dir) — see [RABBITMQ_RUNTIME.md](RABBITMQ_RUNTIME.md). Found: newest Erlang (OTP-29) fails to boot RabbitMQ 4.3.5 at all, confirming the pinned-pair design (`RuntimeSource.Managed`) is load-bearing, not defensive. Residual: this ran on a dev box with existing tooling, not a true clean/minimal VM — worth one more pass before shipping. |
 | Job Object crash-safety unproven under an externally-imposed job | Corporate AppLocker/EDR routinely job-wraps processes; this is exactly the scenario that made a workspace-parent job undesirable (ADR-002) | `WindowsJobObjectSmokeTest` proves the binding on a plain dev machine; the external-job case is still a spike, not yet run. |
 | SQLite `database is locked` under real-time AV scanning | Windows AV scanning the DB file on write is not fully eliminable | WAL + tuned `busy_timeout`, verified real (not mocked) in `SqlitePragmaConfigurerTest`; exact timeout value should come from a load spike, not a guess. |
 | DPAPI round-trip failure on profile reset / roaming-profile edge cases | Would silently lock a user out of stored secrets | Core round-trip verified real in `DpapiSecretStoreTest`; the profile-reset/roaming edge case is not yet tested. |

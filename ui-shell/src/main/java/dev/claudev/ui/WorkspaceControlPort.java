@@ -32,8 +32,11 @@ public interface WorkspaceControlPort {
 
     List<Instance> listInstances(WorkspaceId workspaceId);
 
-    /** Creates an instance backed by {@code adapter-dummy-runtime} — see docs/MILESTONES.md WP5 on why a dummy, not a real RabbitMQ/Redis instance, is what V1's workspace UI can actually drive today. */
+    /** Creates an instance backed by {@code adapter-dummy-runtime} (WP5) — a real spawned process, just not a real RabbitMQ/Redis one. */
     Instance createDummyInstance(WorkspaceId workspaceId, String name);
+
+    /** Creates a real RabbitMQ instance (WP6) — {@code adapter-rabbitmq} is provisioned lazily on first start, not at app startup (see docs/MILESTONES.md). */
+    Instance createRabbitMqInstance(WorkspaceId workspaceId, String name);
 
     void deleteInstance(InstanceId id);
 
@@ -70,6 +73,11 @@ public interface WorkspaceControlPort {
 
             @Override
             public Instance createDummyInstance(WorkspaceId workspaceId, String name) {
+                throw new IllegalStateException("no backend wired");
+            }
+
+            @Override
+            public Instance createRabbitMqInstance(WorkspaceId workspaceId, String name) {
                 throw new IllegalStateException("no backend wired");
             }
 

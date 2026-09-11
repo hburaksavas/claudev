@@ -134,7 +134,7 @@ public final class RabbitMqRuntimeProvider implements RuntimeProvider {
         NodeHandle handle = new NodeHandle(launch, nodename, cookie);
         nodes.put(command.instanceId(), handle);
 
-        RabbitMqCtl.Result readiness = RabbitMqCtl.run(installation, nodename, cookie, Duration.ofSeconds(60), "await_startup");
+        RabbitMqCtl.Result readiness = awaitStartupWithRetry(nodename, cookie, Duration.ofSeconds(60));
         if (!readiness.succeeded()) {
             launch.job().terminate(1);
             launch.job().close();
@@ -179,6 +179,34 @@ public final class RabbitMqRuntimeProvider implements RuntimeProvider {
         RabbitMqCtl.Result status = RabbitMqCtl.run(installation, handle.nodename(), handle.cookie(), Duration.ofSeconds(10), "status");
         return ProviderResult.ok(new InstanceHealth(
                 instanceId, status.succeeded() ? "running" : "unreachable", truncate(status.output())));
+    }
+
+    /**
+     * A real race, found via a flaky test failure rather than assumed: immediately after {@code
+     * WindowsProcessLauncher.launch} resumes the suspended process, the {@code cmd.exe -> erl.exe}
+     * chain has not necessarily registered the node with EPMD yet. A single {@code rabbitmqctl
+     * await_startup} invocation issued at that instant reports "node ... not running at all" —
+     * epmd's answer for "I have never heard of this name" — and returns immediately rather than
+     * retrying, since from its perspective there is nothing yet to wait on. Retrying the whole
+     * invocation ourselves (not relying on {@code await_startup} to internally retry through that
+     * specific state) is what actually closes the race.
+     */
+    private RabbitMqCtl.Result awaitStartupWithRetry(String nodename, String cookie, Duration overallTimeout) {
+        java.time.Instant deadline = java.time.Instant.now().plus(overallTimeout);
+        RabbitMqCtl.Result last;
+        do {
+            last = RabbitMqCtl.run(installation, nodename, cookie, Duration.ofSeconds(15), "await_startup");
+            if (last.succeeded()) {
+                return last;
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return last;
+            }
+        } while (java.time.Instant.now().isBefore(deadline));
+        return last;
     }
 
     private static boolean waitForExit(long pid, Duration timeout) {

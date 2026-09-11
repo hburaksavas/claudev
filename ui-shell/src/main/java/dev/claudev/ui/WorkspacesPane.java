@@ -114,6 +114,9 @@ public final class WorkspacesPane extends BorderPane {
         Button newInstance = new Button("New dummy instance...");
         newInstance.setOnAction(e -> promptNewInstance());
 
+        Button newRabbitMq = new Button("New RabbitMQ instance...");
+        newRabbitMq.setOnAction(e -> promptNewRabbitMqInstance());
+
         Button start = new Button("Start");
         start.setOnAction(e -> dispatch(controlPort::startInstance, "start"));
 
@@ -123,7 +126,7 @@ public final class WorkspacesPane extends BorderPane {
         Button delete = new Button("Delete instance");
         delete.setOnAction(e -> deleteSelectedInstance());
 
-        return new HBox(8, newInstance, start, stop, delete);
+        return new HBox(8, newInstance, newRabbitMq, start, stop, delete);
     }
 
     private TableView<Instance> instanceTableWithColumns() {
@@ -183,16 +186,24 @@ public final class WorkspacesPane extends BorderPane {
     }
 
     private void promptNewInstance() {
+        promptNewInstance("New dummy instance", controlPort::createDummyInstance);
+    }
+
+    private void promptNewRabbitMqInstance() {
+        promptNewInstance("New RabbitMQ instance", controlPort::createRabbitMqInstance);
+    }
+
+    private void promptNewInstance(String title, java.util.function.BiFunction<WorkspaceId, String, Instance> create) {
         WorkspaceId workspaceId = selectedWorkspaceId;
         if (workspaceId == null) {
             return;
         }
         TextInputDialog dialog = new TextInputDialog();
-        dialog.setTitle("New dummy instance");
+        dialog.setTitle(title);
         dialog.setHeaderText(null);
         dialog.setContentText("Name:");
         dialog.showAndWait().filter(name -> !name.isBlank()).ifPresent(name -> {
-            runAsync(() -> controlPort.createDummyInstance(workspaceId, name));
+            runAsync(() -> create.apply(workspaceId, name));
         });
     }
 

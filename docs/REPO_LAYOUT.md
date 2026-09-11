@@ -44,8 +44,9 @@ secret-store-legacy    Base64 "encoded, not encrypted" import-only SecretStore, 
 
 adapter-rabbitmq       RuntimeProvider for the pinned RabbitMQ+Erlang pair (WP6) — real, tested
                        against real spawned nodes (start/stop/health, two simultaneous nodes,
-                       EPMD survival, a Turkish-character data dir), not mocked. Not yet wired as
-                       a Spring bean in app-bootstrap (see MILESTONES.md WP6 for why).
+                       EPMD survival, a Turkish-character data dir), not mocked. Wired into
+                       app-bootstrap via RabbitMqProviderHolder, which provisions the pinned pair
+                       lazily on first use rather than at every app startup.
                        Depends on: provider-api, platform-windows.
 
 adapter-redis          ConnectionProvider, connection-only, Lettuce client. [stub]

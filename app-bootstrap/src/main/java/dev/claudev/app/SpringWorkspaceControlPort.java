@@ -37,11 +37,14 @@ import dev.claudev.ui.WorkspaceControlPort;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -57,15 +60,18 @@ import java.util.function.Consumer;
 @Component
 public class SpringWorkspaceControlPort implements WorkspaceControlPort {
 
-    /** One shared, deterministic (not random-per-run) definition row so restarts don't accumulate duplicates. */
+    /** One shared, deterministic (not random-per-run) definition row per kind so restarts don't accumulate duplicates. */
     private static final RuntimeDefinitionId DUMMY_RUNTIME_DEFINITION_ID = new RuntimeDefinitionId(
             UUID.nameUUIDFromBytes("adapter-dummy-runtime".getBytes(StandardCharsets.UTF_8)));
+    private static final RuntimeDefinitionId RABBITMQ_RUNTIME_DEFINITION_ID = new RuntimeDefinitionId(
+            UUID.nameUUIDFromBytes("adapter-rabbitmq".getBytes(StandardCharsets.UTF_8)));
 
     private final WorkspaceRepository workspaceRepository;
     private final InstanceRepository instanceRepository;
     private final LaunchRecordRepository launchRecordRepository;
     private final RuntimeDefinitionRepository runtimeDefinitionRepository;
-    private final RuntimeProvider runtimeProvider;
+    private final RuntimeProvider dummyRuntimeProvider;
+    private final RabbitMqProviderHolder rabbitMqProviderHolder;
     private final OperationEngine operationEngine;
     private final Reconciler reconciler;
     private final Path instancesRoot;
@@ -75,7 +81,8 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
             InstanceRepository instanceRepository,
             LaunchRecordRepository launchRecordRepository,
             RuntimeDefinitionRepository runtimeDefinitionRepository,
-            RuntimeProvider runtimeProvider,
+            RuntimeProvider dummyRuntimeProvider,
+            RabbitMqProviderHolder rabbitMqProviderHolder,
             OperationEngine operationEngine,
             Reconciler reconciler,
             @Value("${claudev.managed-binaries-dir:${user.home}/.claudev/runtimes}") String managedBinariesDir) {
@@ -83,7 +90,8 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
         this.instanceRepository = instanceRepository;
         this.launchRecordRepository = launchRecordRepository;
         this.runtimeDefinitionRepository = runtimeDefinitionRepository;
-        this.runtimeProvider = runtimeProvider;
+        this.dummyRuntimeProvider = dummyRuntimeProvider;
+        this.rabbitMqProviderHolder = rabbitMqProviderHolder;
         this.operationEngine = operationEngine;
         this.reconciler = reconciler;
         this.instancesRoot = Path.of(managedBinariesDir);
@@ -133,6 +141,22 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
     }
 
     @Override
+    public Instance createRabbitMqInstance(WorkspaceId workspaceId, String name) {
+        ensureRabbitMqRuntimeDefinition();
+
+        InstanceId instanceId = InstanceId.newId();
+        Set<Integer> ports = findTwoFreeLoopbackPorts();
+        Instance instance = new Instance(
+                instanceId, workspaceId, RABBITMQ_RUNTIME_DEFINITION_ID, name,
+                new PortSet(ports, Set.of()),
+                instancesRoot.resolve(instanceId.value().toString()).resolve("data"),
+                instancesRoot.resolve(instanceId.value().toString()).resolve("logs"),
+                DesiredState.STOPPED, Optional.empty(), InstanceState.STOPPED);
+        instanceRepository.insert(instance);
+        return instance;
+    }
+
+    @Override
     public void deleteInstance(InstanceId id) {
         if (launchRecordRepository.findByInstanceId(id).isPresent()) {
             throw new IllegalStateException("stop this instance before deleting it");
@@ -149,11 +173,14 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
                             .orElseThrow(() -> new IllegalStateException("instance not found: " + id));
                     Instance instance = versioned.value();
                     ctx.progress("starting " + instance.name());
+                    ctx.log("resolving runtime provider (a RabbitMQ instance's first-ever start on this "
+                            + "machine downloads and verifies ~250MB — see docs/RABBITMQ_RUNTIME.md)");
 
+                    RuntimeProvider provider = resolveProvider(instance.runtimeDefinitionId());
                     StartInstanceCommand command = new StartInstanceCommand(
                             id.value().toString(), instance.runtimeDefinitionId().value().toString(),
                             instance.dataDir(), instance.logDir(), instance.ports().requested(), java.util.Map.of());
-                    ProviderResult<StartInstanceOutcome> result = runtimeProvider.start(command);
+                    ProviderResult<StartInstanceOutcome> result = provider.start(command);
                     if (result instanceof ProviderResult.Err<StartInstanceOutcome> err) {
                         throw new IllegalStateException(describeError(err.error()));
                     }
@@ -166,7 +193,7 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
                     // only (see Reconciler#deriveState).
                     launchRecordRepository.save(id, new LaunchRecord(
                             outcome.pid(), "", outcome.exeFingerprintSha256(), outcome.processCreationTime(),
-                            outcome.instanceToken(), 0, instance.dataDir().toString(), "dummy-start"));
+                            outcome.instanceToken(), 0, instance.dataDir().toString(), "instance-start"));
 
                     Instance running = new Instance(
                             instance.id(), instance.workspaceId(), instance.runtimeDefinitionId(), instance.name(),
@@ -192,10 +219,11 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
                     Optional<LaunchRecord> launchRecord = launchRecordRepository.findByInstanceId(id);
                     if (launchRecord.isPresent()) {
                         LaunchRecord record = launchRecord.get();
+                        RuntimeProvider provider = resolveProvider(instance.runtimeDefinitionId());
                         StopInstanceCommand command = new StopInstanceCommand(
                                 id.value().toString(), record.pid(), record.processCreationTime(),
                                 record.instanceToken(), true);
-                        ProviderResult<Ack> result = runtimeProvider.stop(command);
+                        ProviderResult<Ack> result = provider.stop(command);
                         if (result instanceof ProviderResult.Err<Ack> err) {
                             throw new IllegalStateException(describeError(err.error()));
                         }
@@ -233,6 +261,44 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
         runtimeDefinitionRepository.insert(new RuntimeDefinition(
                 DUMMY_RUNTIME_DEFINITION_ID, RuntimeKind.DUMMY,
                 new RuntimeSource.Imported(instancesRoot), 1));
+    }
+
+    private void ensureRabbitMqRuntimeDefinition() {
+        if (runtimeDefinitionRepository.findById(RABBITMQ_RUNTIME_DEFINITION_ID).isPresent()) {
+            return;
+        }
+        runtimeDefinitionRepository.insert(new RuntimeDefinition(
+                RABBITMQ_RUNTIME_DEFINITION_ID, RuntimeKind.RABBIT_MQ,
+                new RuntimeSource.Imported(instancesRoot), 1));
+    }
+
+    /**
+     * {@code adapter-rabbitmq} isn't a Spring bean (see docs/MILESTONES.md WP6 — eager provisioning
+     * at every app startup would mean an unconditional ~250MB download); it's provisioned lazily,
+     * once, on first dispatch to a RABBIT_MQ instance via {@link RabbitMqProviderHolder}.
+     */
+    private RuntimeProvider resolveProvider(RuntimeDefinitionId runtimeDefinitionId) throws IOException, InterruptedException {
+        RuntimeDefinition definition = runtimeDefinitionRepository.findById(runtimeDefinitionId)
+                .orElseThrow(() -> new IllegalStateException("runtime definition not found: " + runtimeDefinitionId));
+        return switch (definition.kind()) {
+            case DUMMY -> dummyRuntimeProvider;
+            case RABBIT_MQ -> rabbitMqProviderHolder.get();
+            case REDIS -> throw new IllegalStateException(
+                    "REDIS is a ConnectionProvider (connection-only, D8) — it has no RuntimeProvider/instance lifecycle");
+        };
+    }
+
+    /**
+     * Binds two loopback sockets simultaneously (not two sequential bind/release calls) so the OS
+     * cannot hand back the same ephemeral port for both — a real, if narrow, race on a busy machine.
+     */
+    private static Set<Integer> findTwoFreeLoopbackPorts() {
+        try (ServerSocket first = new ServerSocket(0);
+             ServerSocket second = new ServerSocket(0)) {
+            return Set.of(first.getLocalPort(), second.getLocalPort());
+        } catch (IOException e) {
+            throw new IllegalStateException("Could not find free loopback ports: " + e.getMessage(), e);
+        }
     }
 
     private static String describeError(ProviderError error) {

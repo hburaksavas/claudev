@@ -332,14 +332,31 @@ CREATE, TRUNCATE_EXISTING)` silently defaults to a read-only channel open withou
 `WRITE` option (per `Files.newByteChannel`'s own contract — `CREATE` requires `WRITE`/`APPEND` to
 have any effect), throwing `NoSuchFileException` for a file that was never going to be created.
 
-**Not done — deliberately deferred, not an oversight:** the adapter is not wired as a Spring bean in
-`app-bootstrap`. Doing so today would mean either (a) provisioning ~250MB eagerly at every app
-startup on a fresh machine, which is a real behavior/cost regression worth its own decision, or (b)
-some kind of lazy/on-demand provisioning trigger that doesn't exist yet since WP5's workspace UI can
-only create `adapter-dummy-runtime`-backed instances — there is no "pick a runtime kind" UI or
-per-kind provider dispatch mechanism today (the current wiring is "exactly one `RuntimeProvider`
-bean," per WP5's `AdapterConfig`). Wiring this in is real, scoped follow-up work, not a gap in the
-adapter itself.
+**A third real bug, a genuine race, found via a flaky test rather than assumed:** immediately after
+`WindowsProcessLauncher.launch` resumes the suspended `cmd.exe` (which then execs `erl.exe`), the
+node has not necessarily registered with EPMD yet. A single `rabbitmqctl await_startup` call issued
+at that instant sometimes got back "node ... not running at all" — EPMD's answer for "I have never
+heard of this name" — and `await_startup` returned that as a hard failure immediately rather than
+retrying through it, since from its own perspective there was nothing yet to wait on. About 1 start
+in 3-4 hit this in practice. Fixed by retrying the whole `await_startup` invocation ourselves (every
+500ms, up to the same 60s overall budget) instead of trusting a single call's internal retry
+behavior to cover this specific transient state — confirmed fixed over several repeated full runs
+after the change, not just one lucky pass.
+
+**Now wired into `app-bootstrap`** (this was originally deferred, then picked up in the same WP6
+pass once the adapter itself was proven solid): `RabbitMqProviderHolder` provisions the pinned pair
+*lazily*, on first dispatch to a RABBIT_MQ instance, not at Spring context startup — confirmed via a
+timed `mvn spring-boot:run` (under 1s to `Started ClaudevApplication`, no network I/O) that adding
+this bean doesn't regress every other startup's cost. `SpringWorkspaceControlPort` now dispatches
+`start`/`stop` to whichever `RuntimeProvider` actually owns the instance's `RuntimeDefinition.kind`
+(`DUMMY` → the WP5 dummy provider, `RABBIT_MQ` → the lazily-provisioned RabbitMQ one) instead of
+always using one fixed provider, and `WorkspacesPane` gained a "New RabbitMQ instance..." button
+that allocates two real free loopback ports (two simultaneously-open `ServerSocket(0)`s, so the OS
+can't hand back the same ephemeral port for both) before creating the instance. A RabbitMQ
+instance's first-ever start on a machine logs a note that it may take a while (the ~250MB download),
+so the operation log doesn't look stuck. **Not yet clicked through by hand in this session** — see
+the same screenshot-capture limitation noted in WP5; verified via the full test suite plus a timed
+startup log, not visually.
 
 **Acceptance:** two simultaneous instances under a non-ASCII (Turkish) profile path — met; stopping
 one disturbs neither the other nor a pre-existing/EPMD-owning-job scenario — met; "app crash leaves

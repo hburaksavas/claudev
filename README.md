@@ -28,7 +28,8 @@ implements the full step catalog (Git, Maven, config patching, deploy, health ch
 as real operations against a real spawned process (`adapter-dummy-runtime`), a live operation event
 log, and a system tray icon; `adapter-rabbitmq` spawns and manages real RabbitMQ nodes (start/stop/
 health, two simultaneous nodes with EPMD survival, a Turkish-character data dir — all tested against
-real binaries, not mocked) but isn't wired into the running app yet — see
+real binaries, not mocked) and is wired in — the workspace UI can create and start real RabbitMQ
+instances, provisioning the pinned binaries lazily on first use rather than at app startup — see
 [docs/MILESTONES.md](docs/MILESTONES.md) WP1-WP6 and WP8, all done. `adapter-redis` is still a stub;
 MILESTONES.md has the full plan and
 WP5's two honestly-deferred items (the D13 "not encrypted" badge, and a faster externally-killed-

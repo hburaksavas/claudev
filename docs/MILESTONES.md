@@ -586,16 +586,49 @@ decision, not folded in here. **Also not built:** any UI to set these two proper
 the app (today they're `application.properties`/JVM-arg only) — a real, small follow-up, not
 required for the underlying capability to work.
 
-**10c — RabbitMQ: plugin management (Shovel, management, federation, ...).** Nothing exists today —
-no `RabbitMqPlugins` class, no port method, no UI. **Build:** a `RabbitMqPlugins` helper mirroring
-`RabbitMqCtl`'s shape (spawns `rabbitmq-plugins.bat enable/disable/list` via `cmd.exe /c` through
-WP1's launcher, same nodename/`ERLANG_HOME` environment); a new `RuntimeProvider`-adjacent capability
-to expose it (this doesn't fit the existing port's `start`/`stop`/`healthCheck` shape either — needs
-its own method or a RabbitMQ-specific escape hatch, a real design decision to make deliberately, not
-bolt on silently); a "Plugins" dialog in `WorkspacesPane` listing enabled/available plugins with
-enable/disable actions per instance. **Acceptance:** enabling Shovel on a real running test node via
-the UI, confirmed via `rabbitmq-plugins list` showing it enabled and (if scoped in) a real shovel
-actually moving a message between two real queues.
+**10c — RabbitMQ: plugin management (Shovel, management, federation, ...) — DONE.**
+
+**Design decision made deliberately, not bolted on**: plugin methods
+(`listEnabledPlugins`/`enablePlugin`/`disablePlugin`) were added as **public methods directly on
+`RabbitMqRuntimeProvider`**, not on the shared `RuntimeProvider` port — no other runtime kind has a
+"plugins" concept, and `provider-api` stays domain-agnostic (D2). `SpringWorkspaceControlPort`
+resolves the instance's provider as usual, then `instanceof`-checks for `RabbitMqRuntimeProvider`
+before delegating, rejecting non-RabbitMQ instances with a clear message rather than silently
+no-op'ing.
+
+**Built:**
+- `RabbitMqPlugins`: spawns `rabbitmq-plugins.bat list/enable/disable` via `cmd.exe /c` through
+  WP1's launcher — same shape as `RabbitMqCtl`, which was generalized (`runScript`) to spawn any
+  `rabbitmqctl`-family script rather than duplicating the spawn/capture glue a second time.
+- `RabbitMqRuntimeProvider.listEnabledPlugins`/`enablePlugin`/`disablePlugin`: work only for an
+  instance tracked in the provider's in-memory `nodes` map (same pre-existing limitation as
+  `start`/`stop` — an instance whose node survived an app restart but was never re-started in this
+  JVM run can't have its plugins managed until it is).
+- `WorkspaceControlPort` (`ui-shell`) gained the same three methods; `WorkspacesPane` gained a
+  "Plugins..." dialog (enabled-plugins list, a name field, Enable/Disable/Refresh).
+
+**A real CLI quirk found by exploring the actual binary, not assumed:** `rabbitmq-plugins.bat
+enable <nonexistent-name>` exits **0** — it prints a WARNING, not an error, so the exit code alone
+cannot tell you whether a plugin was actually enabled. `enable`/`disable` always re-check
+`listEnabled` afterward and report success based on the plugin's *actual* presence/absence in that
+list, never the exit code.
+
+**Verified for real** (`RabbitMqRuntimeProviderPluginsTest`, `SpringWorkspaceControlPortPluginsTest`
+— 5 tests): enabling/disabling the real `rabbitmq_shovel` plugin on a real running node actually
+changes its state (checked via a fresh `list -e -m` read, not assumed from the enable call); a
+nonexistent plugin name is correctly reported as a failure despite the CLI's zero exit code; plugin
+actions against an untracked instance id are rejected; the full path — create a RabbitMQ instance
+through `SpringWorkspaceControlPort`, start it for real (reusing WP10b's imported-path mode against
+the spike's cached binaries), then enable/disable a real plugin through the same port the UI calls —
+works end to end; the same call against a `DUMMY` instance is rejected with a clear message instead
+of silently doing nothing.
+
+**Acceptance:** enabling Shovel on a real running node — met (verified via the full test suite
+driving the same port the UI calls, not yet clicked through by hand — same screenshot-capture
+limitation noted since WP5). "A real shovel actually moving a message between two real queues" was
+not attempted — out of scope for "can this app enable/disable a plugin," which is what 10c set out
+to answer; that would be its own follow-up exercising Shovel's actual message-routing feature, not
+plugin management.
 
 ---
 
@@ -603,13 +636,13 @@ actually moving a message between two real queues.
 
 Supersedes scattered "not done"/"deferred" notes above as the actual next-up order — those notes
 stay as the historical record of what each WP decided to skip and why; this list is where to start.
-10a/10b are done (see above) and stay listed only so the sequence reads as it was actually planned.
+10a/10b/10c are done (see above) and stay listed only so the sequence reads as it was actually planned.
 
 1. ~~**10a — Redis manual connection UI.**~~ DONE.
 2. ~~**10b — RabbitMQ `Imported` source support.**~~ DONE as a config property; the UI to set it
    from within the app is still open (see 10b's own note) but doesn't block the capability.
-3. **10c — RabbitMQ plugin management.** Medium: needs a real port/capability decision (see 10c's
-   own scope note) before the mechanical `rabbitmq-plugins.bat` wiring is worth writing.
+3. ~~**10c — RabbitMQ plugin management.**~~ DONE — a RabbitMQ-specific escape hatch on
+   `RabbitMqRuntimeProvider`, not a `RuntimeProvider` port method (see 10c's own note on why).
 4. **Redis Hash/List/Set/ZSet typed edit set.** Needs the `MutationRequest` DTO extension flagged in
    WP7 (a field/member slot) — a deliberate second look at that shared port type, not a quick patch.
 5. **Redis `environmentClass` authorization + audit-entry gate.** The safety layer `authorizeMutation`

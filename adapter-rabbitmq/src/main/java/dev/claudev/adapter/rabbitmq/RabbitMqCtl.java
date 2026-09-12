@@ -31,13 +31,19 @@ final class RabbitMqCtl {
     }
 
     static Result run(RabbitMqInstallation installation, String nodename, String cookie, Duration timeout, String... args) {
+        return runScript(installation, "rabbitmqctl.bat", nodename, cookie, timeout, args);
+    }
+
+    /** Same shape as {@link #run}, generalized to any {@code rabbitmqctl}-family script (e.g. {@code rabbitmq-plugins.bat}, used by {@link RabbitMqPlugins}) — all of them honor {@code -n}/{@code RABBITMQ_CTL_ERL_ARGS} identically. */
+    static Result runScript(
+            RabbitMqInstallation installation, String scriptFileName, String nodename, String cookie, Duration timeout, String... args) {
         Path cmdExe = Path.of(System.getenv("SystemRoot"), "System32", "cmd.exe");
-        Path ctlBat = installation.rabbitmqSbin().resolve("rabbitmqctl.bat");
+        Path scriptBat = installation.rabbitmqSbin().resolve(scriptFileName);
 
         java.util.ArrayList<String> argv = new java.util.ArrayList<>();
         argv.add(cmdExe.toString());
         argv.add("/c");
-        argv.add(ctlBat.toString());
+        argv.add(scriptBat.toString());
         argv.add("-n");
         argv.add(nodename);
         argv.addAll(List.of(args));

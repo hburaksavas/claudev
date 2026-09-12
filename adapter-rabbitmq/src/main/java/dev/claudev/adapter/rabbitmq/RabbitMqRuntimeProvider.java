@@ -201,6 +201,44 @@ public final class RabbitMqRuntimeProvider implements RuntimeProvider {
     }
 
     /**
+     * WP10c: plugin management (Shovel, management, federation, ...) — deliberately not part of the
+     * shared {@link RuntimeProvider} port (no other runtime kind has a "plugins" concept; see
+     * docs/MILESTONES.md WP10c on why this is a RabbitMQ-specific escape hatch, not a port method).
+     * Like {@link #start}/{@link #stop}, this only works for an instance tracked in {@link #nodes} —
+     * an instance whose node survived an app restart but was never re-`start`-ed in this JVM run
+     * cannot have its plugins managed until it is (the same pre-existing limitation as `stop`).
+     */
+    public ProviderResult<List<String>> listEnabledPlugins(String instanceId) {
+        NodeHandle handle = nodes.get(instanceId);
+        if (handle == null) {
+            return ProviderResult.err(new ProviderError.NotFound("no tracked node: " + instanceId));
+        }
+        return ProviderResult.ok(RabbitMqPlugins.listEnabled(installation, handle.nodename(), handle.cookie()));
+    }
+
+    public ProviderResult<Ack> enablePlugin(String instanceId, String pluginName) {
+        NodeHandle handle = nodes.get(instanceId);
+        if (handle == null) {
+            return ProviderResult.err(new ProviderError.NotFound("no tracked node: " + instanceId));
+        }
+        boolean enabled = RabbitMqPlugins.enable(installation, handle.nodename(), handle.cookie(), pluginName);
+        return enabled
+                ? ProviderResult.ok(Ack.INSTANCE)
+                : ProviderResult.err(new ProviderError.Underlying("PLUGIN_ENABLE_FAILED", pluginName + " is not enabled after the attempt (check the plugin name)"));
+    }
+
+    public ProviderResult<Ack> disablePlugin(String instanceId, String pluginName) {
+        NodeHandle handle = nodes.get(instanceId);
+        if (handle == null) {
+            return ProviderResult.err(new ProviderError.NotFound("no tracked node: " + instanceId));
+        }
+        boolean disabled = RabbitMqPlugins.disable(installation, handle.nodename(), handle.cookie(), pluginName);
+        return disabled
+                ? ProviderResult.ok(Ack.INSTANCE)
+                : ProviderResult.err(new ProviderError.Underlying("PLUGIN_DISABLE_FAILED", pluginName + " is still enabled after the attempt"));
+    }
+
+    /**
      * A real race, found via a flaky test failure rather than assumed: immediately after {@code
      * WindowsProcessLauncher.launch} resumes the suspended process, the {@code cmd.exe -> erl.exe}
      * chain has not necessarily registered the node with EPMD yet. A single {@code rabbitmqctl

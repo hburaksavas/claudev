@@ -126,7 +126,10 @@ public final class WorkspacesPane extends BorderPane {
         Button delete = new Button("Delete instance");
         delete.setOnAction(e -> deleteSelectedInstance());
 
-        return new HBox(8, newInstance, newRabbitMq, start, stop, delete);
+        Button plugins = new Button("Plugins...");
+        plugins.setOnAction(e -> openPluginsDialog());
+
+        return new HBox(8, newInstance, newRabbitMq, start, stop, delete, plugins);
     }
 
     private TableView<Instance> instanceTableWithColumns() {
@@ -227,6 +230,65 @@ public final class WorkspacesPane extends BorderPane {
             controlPort.deleteInstance(selected.id());
             return null;
         }));
+    }
+
+    /** WP10c: RabbitMQ-only — {@link WorkspaceControlPort#listEnabledPlugins} throws for any other instance kind, surfaced here as a plain error dialog rather than special-cased in the UI. */
+    private void openPluginsDialog() {
+        Instance selected = instanceTable.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            return;
+        }
+        InstanceId instanceId = selected.id();
+
+        javafx.scene.control.ListView<String> enabledList = new javafx.scene.control.ListView<>();
+        javafx.scene.control.TextField pluginName = new javafx.scene.control.TextField();
+        pluginName.setPromptText("e.g. rabbitmq_shovel");
+
+        Runnable refreshPlugins = () -> runAsync(() -> {
+            List<String> plugins = controlPort.listEnabledPlugins(instanceId);
+            Platform.runLater(() -> enabledList.getItems().setAll(plugins));
+            return null;
+        });
+
+        Button enable = new Button("Enable");
+        enable.setOnAction(e -> {
+            String name = pluginName.getText().trim();
+            if (!name.isBlank()) {
+                runAsync(() -> {
+                    controlPort.enablePlugin(instanceId, name);
+                    Platform.runLater(refreshPlugins);
+                    return null;
+                });
+            }
+        });
+
+        Button disable = new Button("Disable");
+        disable.setOnAction(e -> {
+            String name = pluginName.getText().trim();
+            if (!name.isBlank()) {
+                runAsync(() -> {
+                    controlPort.disablePlugin(instanceId, name);
+                    Platform.runLater(refreshPlugins);
+                    return null;
+                });
+            }
+        });
+
+        Button refresh = new Button("Refresh");
+        refresh.setOnAction(e -> refreshPlugins.run());
+
+        VBox content = new VBox(8,
+                new Label("Enabled plugins (" + selected.name() + ")"), enabledList,
+                new HBox(8, pluginName, enable, disable, refresh));
+        content.setPadding(new Insets(12));
+        enabledList.setPrefHeight(160);
+
+        javafx.scene.control.Dialog<Void> dialog = new javafx.scene.control.Dialog<>();
+        dialog.setTitle("RabbitMQ plugins");
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        refreshPlugins.run();
+        dialog.showAndWait();
     }
 
     private Optional<ButtonType> confirm(String message) {

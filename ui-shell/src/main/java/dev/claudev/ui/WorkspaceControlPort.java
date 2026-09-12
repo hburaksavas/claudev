@@ -48,6 +48,17 @@ public interface WorkspaceControlPort {
 
     Optional<Operation> findOperation(OperationId id);
 
+    /**
+     * WP10c: RabbitMQ plugin management (Shovel, management, federation, ...) — a RabbitMQ-specific
+     * escape hatch, not a generic capability every instance kind has (see docs/MILESTONES.md WP10c).
+     * Throws for a non-RabbitMQ instance, or one not currently tracked (started in this app run).
+     */
+    List<String> listEnabledPlugins(InstanceId id);
+
+    void enablePlugin(InstanceId id, String pluginName);
+
+    void disablePlugin(InstanceId id, String pluginName);
+
     /** Fallback used when the shell is launched without a backend wired (e.g. directly from an IDE). */
     static WorkspaceControlPort unavailable() {
         return new WorkspaceControlPort() {
@@ -103,6 +114,21 @@ public interface WorkspaceControlPort {
             @Override
             public Optional<Operation> findOperation(OperationId id) {
                 return Optional.empty();
+            }
+
+            @Override
+            public List<String> listEnabledPlugins(InstanceId id) {
+                throw new IllegalStateException("no backend wired");
+            }
+
+            @Override
+            public void enablePlugin(InstanceId id, String pluginName) {
+                throw new IllegalStateException("no backend wired");
+            }
+
+            @Override
+            public void disablePlugin(InstanceId id, String pluginName) {
+                throw new IllegalStateException("no backend wired");
             }
         };
     }

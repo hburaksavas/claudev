@@ -1,5 +1,6 @@
 package dev.claudev.app;
 
+import dev.claudev.adapter.rabbitmq.RabbitMqRuntimeProvider;
 import dev.claudev.domain.DesiredState;
 import dev.claudev.domain.Instance;
 import dev.claudev.domain.InstanceId;
@@ -252,6 +253,49 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
     @Override
     public Optional<Operation> findOperation(OperationId id) {
         return operationEngine.find(id);
+    }
+
+    @Override
+    public List<String> listEnabledPlugins(InstanceId id) {
+        RabbitMqRuntimeProvider rabbit = requireRabbitMqProvider(id);
+        ProviderResult<List<String>> result = rabbit.listEnabledPlugins(id.value().toString());
+        if (result instanceof ProviderResult.Err<List<String>> err) {
+            throw new IllegalStateException(describeError(err.error()));
+        }
+        return ((ProviderResult.Ok<List<String>>) result).value();
+    }
+
+    @Override
+    public void enablePlugin(InstanceId id, String pluginName) {
+        RabbitMqRuntimeProvider rabbit = requireRabbitMqProvider(id);
+        ProviderResult<Ack> result = rabbit.enablePlugin(id.value().toString(), pluginName);
+        if (result instanceof ProviderResult.Err<Ack> err) {
+            throw new IllegalStateException(describeError(err.error()));
+        }
+    }
+
+    @Override
+    public void disablePlugin(InstanceId id, String pluginName) {
+        RabbitMqRuntimeProvider rabbit = requireRabbitMqProvider(id);
+        ProviderResult<Ack> result = rabbit.disablePlugin(id.value().toString(), pluginName);
+        if (result instanceof ProviderResult.Err<Ack> err) {
+            throw new IllegalStateException(describeError(err.error()));
+        }
+    }
+
+    private RabbitMqRuntimeProvider requireRabbitMqProvider(InstanceId id) {
+        Instance instance = instanceRepository.findById(id).map(Versioned::value)
+                .orElseThrow(() -> new IllegalStateException("instance not found: " + id));
+        RuntimeProvider provider;
+        try {
+            provider = resolveProvider(instance.runtimeDefinitionId());
+        } catch (IOException | InterruptedException e) {
+            throw new IllegalStateException("could not resolve runtime provider: " + e.getMessage(), e);
+        }
+        if (!(provider instanceof RabbitMqRuntimeProvider rabbit)) {
+            throw new IllegalStateException("plugin management is only supported for RabbitMQ instances");
+        }
+        return rabbit;
     }
 
     private void ensureDummyRuntimeDefinition() {

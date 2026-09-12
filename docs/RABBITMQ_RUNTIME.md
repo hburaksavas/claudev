@@ -19,6 +19,14 @@ provisioning entirely; set `claudev.rabbitmq.imported-erlang-home` and
 `claudev.rabbitmq.imported-rabbitmq-sbin` to use it — no UI for this yet, config-property only.
 `System` (auto-discovered, never lifecycle-owned) is not built.
 
+## Plugin management (WP10c)
+
+`RabbitMqRuntimeProvider.listEnabledPlugins`/`enablePlugin`/`disablePlugin` are real — a RabbitMQ-
+specific escape hatch (not a `RuntimeProvider` port method; see docs/MILESTONES.md WP10c) that
+spawns `rabbitmq-plugins.bat` the same way `rabbitmqctl.bat` is spawned. A real quirk: `enable` on a
+nonexistent plugin name exits `0` (a WARNING, not an error), so success is always verified against a
+fresh `list -e -m` read, never the exit code.
+
 ## Per-instance isolation
 
 - Foreground node (not installed as a Windows Service — that needs admin).

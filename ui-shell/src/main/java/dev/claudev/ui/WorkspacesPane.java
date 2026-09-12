@@ -349,13 +349,27 @@ public final class WorkspacesPane extends BorderPane {
             List<Instance> instances = keepSelected == null ? List.of() : controlPort.listInstances(keepSelected);
 
             Platform.runLater(() -> {
-                Workspace previouslySelected = workspaceTable.getSelectionModel().getSelectedItem();
-                workspaceRows.setAll(workspaces);
-                if (previouslySelected != null) {
-                    workspaces.stream().filter(w -> w.id().equals(previouslySelected.id())).findFirst()
-                            .ifPresent(w -> workspaceTable.getSelectionModel().select(w));
+                // A real freeze found from user reproduction, not assumed: TableView.setAll(), even when
+                // the new list is equal in content, resets the selection/focus model, which fires a
+                // Windows accessibility notification (WinAccessible.sendNotification) on every single
+                // call. On this machine that native call is slow enough that doing it unconditionally
+                // every 2s pegs the FX Application Thread and starves all real user input behind it —
+                // confirmed by a thread dump showing the JavaFX Application Thread stuck in exactly that
+                // call chain (TableView selection churn -> notifyAccessibleAttributeChanged). Skipping
+                // the list replace when nothing actually changed avoids the selection-model churn (and
+                // therefore the notification) on every poll that finds no new data, which is the common
+                // case.
+                if (!workspaceRows.equals(workspaces)) {
+                    Workspace previouslySelected = workspaceTable.getSelectionModel().getSelectedItem();
+                    workspaceRows.setAll(workspaces);
+                    if (previouslySelected != null) {
+                        workspaces.stream().filter(w -> w.id().equals(previouslySelected.id())).findFirst()
+                                .ifPresent(w -> workspaceTable.getSelectionModel().select(w));
+                    }
                 }
-                instanceRows.setAll(instances);
+                if (!instanceRows.equals(instances)) {
+                    instanceRows.setAll(instances);
+                }
             });
         } catch (RuntimeException e) {
             Platform.runLater(() -> eventLog.appendText("[poll error] " + e.getMessage() + "\n"));

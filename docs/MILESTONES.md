@@ -717,6 +717,42 @@ unilaterally.
 
 ---
 
+## Post-hoc bugfix #2: creating a workspace/instance eventually froze all UI input
+
+A second real hang, reported after the fix above: creating a workspace, then a RabbitMQ instance,
+left the whole window unresponsive to clicks — but *not* flagged "Not Responding" by Windows,
+which ruled out a classic deadlock and pointed at something merely very slow on the FX Application
+Thread. Reproduced directly (real app launched, real mouse/keyboard automation driving the actual
+window, screenshots confirming each step) rather than guessed at, then root-caused with a real
+`jstack` thread dump: the JavaFX Application Thread had burned **52 seconds of CPU in 147 seconds
+of wall time**, stuck in
+
+```
+WorkspacesPane.refreshInBackground → ObservableList.setAll(...)
+  → TableView selection/focus model resets on every call, even when content is unchanged
+  → Node.notifyAccessibleAttributeChanged → WinAccessible.sendNotification
+```
+
+`WinAccessible.sendNotification` — the JavaFX-to-Windows-UI-Automation bridge — is pathologically
+slow on this machine, and `refreshInBackground`'s 2-second poll called `workspaceRows.setAll(...)`/
+`instanceRows.setAll(...)` unconditionally on every tick, including the overwhelming majority where
+the data hadn't changed at all. Each unconditional replace reset `TableView`'s selection/focus
+model and fired one of these slow notifications; at a 2s cadence they compounded fast enough to
+starve the FX Application Thread of time to process real input, while leaving the native window
+itself technically alive (so no OS-level "Not Responding" flag) — exactly the reported symptom.
+
+**Fix**: `WorkspacesPane.refreshInBackground` (ui-shell/src/main/java/dev/claudev/ui/WorkspacesPane.java)
+now only calls `setAll` when the polled list actually differs (`Workspace`/`Instance` are records,
+so `List.equals` is real content equality, not identity) — skipping the selection-model churn, and
+therefore the notification, on every poll that finds nothing new. Re-ran the exact repro after the
+fix: same real app, same click sequence, several 2-second poll cycles left running — the JavaFX
+Application Thread's CPU usage dropped to **969ms over 220s wall time**, and the window kept
+responding to clicks (confirmed by screenshot) throughout. `ConnectionsPane` has the equivalent
+`setAll` call but only on-demand (construction/explicit refresh, not a recurring poll), so it
+wasn't touched — nothing there compounds the way the periodic one did.
+
+---
+
 ## Spike status
 
 | Spike | Status |

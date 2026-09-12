@@ -102,6 +102,36 @@ public final class RedisConnectionProvider implements ConnectionProvider {
         });
     }
 
+    private static final int COLLECTION_READ_SIZE_CAP = 1000;
+
+    @Override
+    public ProviderResult<Map<String, String>> getHash(String connectionId, String key) {
+        return withCommands(connectionId, sync -> {
+            Map<String, String> full = sync.hgetall(key);
+            Map<String, String> capped = full.entrySet().stream().limit(COLLECTION_READ_SIZE_CAP)
+                    .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a, java.util.LinkedHashMap::new));
+            return ProviderResult.ok(capped);
+        });
+    }
+
+    @Override
+    public ProviderResult<List<String>> getListRange(String connectionId, String key, long start, long stop) {
+        return withCommands(connectionId, sync -> ProviderResult.ok(sync.lrange(key, start, stop)));
+    }
+
+    @Override
+    public ProviderResult<List<String>> getSetMembers(String connectionId, String key) {
+        return withCommands(connectionId, sync -> {
+            List<String> capped = sync.smembers(key).stream().limit(COLLECTION_READ_SIZE_CAP).toList();
+            return ProviderResult.ok(capped);
+        });
+    }
+
+    @Override
+    public ProviderResult<List<String>> getSortedSetRange(String connectionId, String key, long start, long stop) {
+        return withCommands(connectionId, sync -> ProviderResult.ok(sync.zrange(key, start, stop)));
+    }
+
     @Override
     public ProviderResult<Ack> authorizeMutation(MutationRequest request) {
         return withCommands(request.connectionId(), sync -> {
@@ -111,6 +141,37 @@ public final class RedisConnectionProvider implements ConnectionProvider {
                 case "DEL" -> sync.del(request.key());
                 case "EXPIRE" -> sync.expire(request.key(), Long.parseLong(request.value()));
                 case "PERSIST" -> sync.persist(request.key());
+                case "HSET" -> {
+                    if (request.field().isEmpty()) {
+                        return ProviderResult.<Ack>err(new ProviderError.InvalidConfig("HSET requires a field"));
+                    }
+                    sync.hset(request.key(), request.field().get(), request.value());
+                }
+                case "HDEL" -> {
+                    if (request.field().isEmpty()) {
+                        return ProviderResult.<Ack>err(new ProviderError.InvalidConfig("HDEL requires a field"));
+                    }
+                    sync.hdel(request.key(), request.field().get());
+                }
+                case "LPUSH" -> sync.lpush(request.key(), request.value());
+                case "RPUSH" -> sync.rpush(request.key(), request.value());
+                case "LPOP" -> sync.lpop(request.key());
+                case "RPOP" -> sync.rpop(request.key());
+                case "SADD" -> sync.sadd(request.key(), request.value());
+                case "SREM" -> sync.srem(request.key(), request.value());
+                case "ZADD" -> {
+                    if (request.field().isEmpty()) {
+                        return ProviderResult.<Ack>err(new ProviderError.InvalidConfig("ZADD requires a score in field"));
+                    }
+                    double parsedScore;
+                    try {
+                        parsedScore = Double.parseDouble(request.field().get());
+                    } catch (NumberFormatException e) {
+                        return ProviderResult.<Ack>err(new ProviderError.InvalidConfig("ZADD score is not a number: " + request.field().get()));
+                    }
+                    sync.zadd(request.key(), parsedScore, request.value());
+                }
+                case "ZREM" -> sync.zrem(request.key(), request.value());
                 default -> {
                     return ProviderResult.<Ack>err(new ProviderError.InvalidConfig(
                             "operation not in the V1 allow-list (docs/REDIS_SCOPE.md): " + request.operation()));

@@ -226,4 +226,86 @@ class RedisConnectionProviderTest {
         assertThat(provider.getString(unknownId, "k")).isInstanceOf(ProviderResult.Err.class);
         assertThat(provider.authorizeMutation(new MutationRequest(unknownId, "SET", "k", "v"))).isInstanceOf(ProviderResult.Err.class);
     }
+
+    @Test
+    void hashFieldsWorkAgainstARealServer() {
+        String id = connect();
+        String key = "claudev:test:hash:" + UUID.randomUUID();
+
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "HSET", key, "v1", Optional.of("f1")))).isInstanceOf(ProviderResult.Ok.class);
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "HSET", key, "v2", Optional.of("f2")))).isInstanceOf(ProviderResult.Ok.class);
+
+        ProviderResult<java.util.Map<String, String>> hash = provider.getHash(id, key);
+        assertThat(hash).isInstanceOf(ProviderResult.Ok.class);
+        assertThat(((ProviderResult.Ok<java.util.Map<String, String>>) hash).value()).containsEntry("f1", "v1").containsEntry("f2", "v2");
+
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "HDEL", key, "", Optional.of("f1")))).isInstanceOf(ProviderResult.Ok.class);
+        ProviderResult<java.util.Map<String, String>> afterDel = provider.getHash(id, key);
+        assertThat(((ProviderResult.Ok<java.util.Map<String, String>>) afterDel).value()).doesNotContainKey("f1").containsKey("f2");
+    }
+
+    @Test
+    void hsetWithoutAFieldIsRejected() {
+        String id = connect();
+        ProviderResult<Ack> result = provider.authorizeMutation(new MutationRequest(id, "HSET", "some-key", "v"));
+        assertThat(result).isInstanceOf(ProviderResult.Err.class);
+    }
+
+    @Test
+    void listOperationsWorkAgainstARealServer() {
+        String id = connect();
+        String key = "claudev:test:list:" + UUID.randomUUID();
+
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "RPUSH", key, "b"))).isInstanceOf(ProviderResult.Ok.class);
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "LPUSH", key, "a"))).isInstanceOf(ProviderResult.Ok.class);
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "RPUSH", key, "c"))).isInstanceOf(ProviderResult.Ok.class);
+
+        ProviderResult<java.util.List<String>> range = provider.getListRange(id, key, 0, -1);
+        assertThat(range).isInstanceOf(ProviderResult.Ok.class);
+        assertThat(((ProviderResult.Ok<java.util.List<String>>) range).value()).containsExactly("a", "b", "c");
+
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "LPOP", key, ""))).isInstanceOf(ProviderResult.Ok.class);
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "RPOP", key, ""))).isInstanceOf(ProviderResult.Ok.class);
+        ProviderResult<java.util.List<String>> afterPops = provider.getListRange(id, key, 0, -1);
+        assertThat(((ProviderResult.Ok<java.util.List<String>>) afterPops).value()).containsExactly("b");
+    }
+
+    @Test
+    void setOperationsWorkAgainstARealServer() {
+        String id = connect();
+        String key = "claudev:test:set:" + UUID.randomUUID();
+
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "SADD", key, "x"))).isInstanceOf(ProviderResult.Ok.class);
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "SADD", key, "y"))).isInstanceOf(ProviderResult.Ok.class);
+
+        ProviderResult<java.util.List<String>> members = provider.getSetMembers(id, key);
+        assertThat(((ProviderResult.Ok<java.util.List<String>>) members).value()).containsExactlyInAnyOrder("x", "y");
+
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "SREM", key, "x"))).isInstanceOf(ProviderResult.Ok.class);
+        ProviderResult<java.util.List<String>> afterRem = provider.getSetMembers(id, key);
+        assertThat(((ProviderResult.Ok<java.util.List<String>>) afterRem).value()).containsExactly("y");
+    }
+
+    @Test
+    void sortedSetOperationsWorkAgainstARealServer() {
+        String id = connect();
+        String key = "claudev:test:zset:" + UUID.randomUUID();
+
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "ZADD", key, "low", Optional.of("1.0")))).isInstanceOf(ProviderResult.Ok.class);
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "ZADD", key, "high", Optional.of("2.0")))).isInstanceOf(ProviderResult.Ok.class);
+
+        ProviderResult<java.util.List<String>> range = provider.getSortedSetRange(id, key, 0, -1);
+        assertThat(((ProviderResult.Ok<java.util.List<String>>) range).value()).containsExactly("low", "high");
+
+        assertThat(provider.authorizeMutation(new MutationRequest(id, "ZREM", key, "low"))).isInstanceOf(ProviderResult.Ok.class);
+        ProviderResult<java.util.List<String>> afterRem = provider.getSortedSetRange(id, key, 0, -1);
+        assertThat(((ProviderResult.Ok<java.util.List<String>>) afterRem).value()).containsExactly("high");
+    }
+
+    @Test
+    void zaddWithANonNumericScoreIsRejected() {
+        String id = connect();
+        ProviderResult<Ack> result = provider.authorizeMutation(new MutationRequest(id, "ZADD", "some-key", "member", Optional.of("not-a-number")));
+        assertThat(result).isInstanceOf(ProviderResult.Err.class);
+    }
 }

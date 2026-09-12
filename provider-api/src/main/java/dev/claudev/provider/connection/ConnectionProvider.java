@@ -4,6 +4,9 @@ import dev.claudev.provider.Ack;
 import dev.claudev.provider.AdapterManifest;
 import dev.claudev.provider.ProviderResult;
 
+import java.util.List;
+import java.util.Map;
+
 /**
  * Redis connection/explorer port. V1 scope is connection-only (remote + imported/system sources,
  * no managed local Redis) with a small typed edit set — see docs/REDIS_SCOPE.md for the exact
@@ -25,6 +28,18 @@ public interface ConnectionProvider {
     ProviderResult<ScanPage> scan(String connectionId, String cursor, int pageSize);
 
     ProviderResult<String> getString(String connectionId, String key);
+
+    /** Size-capped, not a live cursor — see docs/adr/ADR-012-redis-typed-edit-set-dto-shape.md. */
+    ProviderResult<Map<String, String>> getHash(String connectionId, String key);
+
+    /** Genuinely bounded by the caller-supplied window, like {@code LRANGE}. */
+    ProviderResult<List<String>> getListRange(String connectionId, String key, long start, long stop);
+
+    /** Size-capped, not a live cursor — see docs/adr/ADR-012-redis-typed-edit-set-dto-shape.md. */
+    ProviderResult<List<String>> getSetMembers(String connectionId, String key);
+
+    /** Genuinely bounded by the caller-supplied index window, like {@code ZRANGE}. */
+    ProviderResult<List<String>> getSortedSetRange(String connectionId, String key, long start, long stop);
 
     ProviderResult<Ack> authorizeMutation(MutationRequest request);
 

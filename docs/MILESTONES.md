@@ -366,7 +366,7 @@ prove it would mean sacrificing the very process running the test suite).
 
 ---
 
-## WP7 — Redis adapter — PARTIALLY DONE (real, tested, honestly incomplete)
+## WP7 — Redis adapter — data plane DONE; authorization/UI still open
 
 **A real architecture gap found before any adapter code, not an implementation detail:**
 `ConnectionProvider#scan`/`getString`/`authorizeMutation` all took a bare `connectionId` string
@@ -399,20 +399,24 @@ Redis 5.0.14.1 build — see "Sourcing" below, not mocked):
 - Every operation against a `connectionId` that was never `connect`ed returns `NotFound`, not a
   null/empty/silent result.
 
-**Not built — a concrete, scoped gap, not a vague TODO:** Hash (`HGETALL`/`HSET`/`HDEL`), List
-(`LRANGE`/`LPUSH`/`RPUSH`/`LPOP`/`RPOP`), Set (`SMEMBERS`/`SADD`/`SREM`), and ZSet
-(`ZRANGE`/`ZRANGEBYSCORE`/`ZADD`/`ZREM`) are not implemented. `MutationRequest(connectionId,
-operation, key, value)` has no slot for a hash field or set/list member — `HSET` needs a field
-*and* a value, `LPUSH` needs to distinguish "push" from "the pushed value," etc. Packing that into
-the existing `value` string (e.g. `"field=value"`) was considered and rejected: it would be an
-undocumented, adapter-invented wire format outside `provider-api`'s DTO discipline (D2). The real
-fix is a second DTO shape (or a `field: Optional<String>` added to `MutationRequest`) — a small,
-concrete follow-up, not attempted in this pass since it touches the shared port interface a second
-time and deserves its own review rather than being folded in silently. `environmentClass`
-gating/audit-entry writing and any UI (connection creation, browsing, the mutation-confirmation
-flow) are also not built — this WP delivered the adapter's connection+read+partial-write engine,
-not the application layer around it (matching how WP6 separated "adapter built" from "wired into
-the UI").
+**Hash/List/Set/ZSet — DONE** (picked up as backlog item 4, using WP7's own concrete follow-up
+note): [ADR-012](adr/ADR-012-redis-typed-edit-set-dto-shape.md) added `MutationRequest.field`
+(`Optional<String>`, meaning depends on `operation` — hash field name for `HSET`/`HDEL`, score for
+`ZADD`) via a source-compatible overload (the old 4-arg constructor still works, defaulting `field`
+to empty), plus four new `ConnectionProvider` read methods: `getHash` (size-capped, not a live
+cursor), `getListRange`/`getSortedSetRange` (genuinely bounded by a caller-supplied index window,
+like `LRANGE`/`ZRANGE` themselves), `getSetMembers` (size-capped). `authorizeMutation`'s allow-list
+switch grew `HSET`/`HDEL`/`LPUSH`/`RPUSH`/`LPOP`/`RPOP`/`SADD`/`SREM`/`ZADD`/`ZREM`, each real
+against the same test Redis build — `HSET` without a field, or `ZADD` with a non-numeric score, are
+rejected before reaching Lettuce. Verified by 6 new tests in `RedisConnectionProviderTest` (16
+total) exercising every new operation and its read-back for real, including the two rejection
+cases. `ADR-012` also records why a single generic `getCollection` method or full `HSCAN`/`SSCAN`/
+`ZSCAN` cursor paging were considered and not built — see the ADR for the actual reasoning, not
+repeated here.
+
+**Still not built:** `environmentClass` gating/audit-entry writing and any UI (connection creation,
+browsing, the mutation-confirmation flow) — this WP delivers the adapter's full data-plane, not the
+application layer around it (matching how WP6 separated "adapter built" from "wired into the UI").
 
 **Sourcing for testing, not production:** `adapter-redis` never downloads or manages a Redis binary
 — docs/REDIS_SCOPE.md's "no managed local Redis" rule is a real constraint honored here, not
@@ -643,8 +647,7 @@ stay as the historical record of what each WP decided to skip and why; this list
    from within the app is still open (see 10b's own note) but doesn't block the capability.
 3. ~~**10c — RabbitMQ plugin management.**~~ DONE — a RabbitMQ-specific escape hatch on
    `RabbitMqRuntimeProvider`, not a `RuntimeProvider` port method (see 10c's own note on why).
-4. **Redis Hash/List/Set/ZSet typed edit set.** Needs the `MutationRequest` DTO extension flagged in
-   WP7 (a field/member slot) — a deliberate second look at that shared port type, not a quick patch.
+4. ~~**Redis Hash/List/Set/ZSet typed edit set.**~~ DONE — see [ADR-012](adr/ADR-012-redis-typed-edit-set-dto-shape.md).
 5. **Redis `environmentClass` authorization + audit-entry gate.** The safety layer `authorizeMutation`
    is currently named for but doesn't yet enforce — docs/REDIS_SCOPE.md's core safety property.
 6. **WP9 — packaging.** jlink/jpackage, code signing, licensing/SBOM gate, log rotation/redaction,

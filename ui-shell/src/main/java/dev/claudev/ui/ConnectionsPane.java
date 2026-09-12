@@ -39,7 +39,8 @@ import java.util.concurrent.ScheduledExecutorService;
 public final class ConnectionsPane extends BorderPane {
 
     private final ConnectionControlPort controlPort;
-    private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor(r -> {
+    /** Two threads, not one — same reasoning as {@code WorkspacesPane}'s poller: a slow action (a real network connect/reconnect) should never queue behind an unrelated refresh, or vice versa. */
+    private final ScheduledExecutorService worker = Executors.newScheduledThreadPool(2, r -> {
         Thread t = new Thread(r, "claudev-connections-worker");
         t.setDaemon(true);
         return t;
@@ -55,13 +56,22 @@ public final class ConnectionsPane extends BorderPane {
     public ConnectionsPane(ConnectionControlPort controlPort) {
         this.controlPort = controlPort;
         setPadding(new Insets(16));
-        setTop(header());
+        setTop(new VBox(6, subtitle(), header()));
         setCenter(splitPane());
         refresh();
     }
 
     public void shutdown() {
         worker.shutdownNow();
+    }
+
+    private Label subtitle() {
+        Label label = new Label(
+                "Point this at a Redis you already have running (local, WSL2, Docker, or remote) — "
+                        + "this app never installs or manages Redis itself. Redis-only for now.");
+        label.setWrapText(true);
+        label.setStyle("-fx-text-fill: #666; -fx-font-size: 11px;");
+        return label;
     }
 
     private HBox header() {

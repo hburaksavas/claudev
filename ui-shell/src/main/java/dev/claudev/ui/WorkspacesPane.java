@@ -44,7 +44,15 @@ import java.util.concurrent.TimeUnit;
 public final class WorkspacesPane extends BorderPane {
 
     private final WorkspaceControlPort controlPort;
-    private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(runnable -> {
+    /**
+     * A real responsiveness bug found from user feedback: this pool used to be single-threaded,
+     * shared between the periodic 2s refresh and every user action (create/start/stop/plugin calls)
+     * submitted via {@link #runAsync}. A slow action — a RabbitMQ plugin enable/disable can take up
+     * to ~30s of real spawn-and-verify time — queued the periodic refresh behind it, so the table
+     * stopped updating and the UI looked stuck for the whole duration. Two threads means the
+     * scheduled refresh and a one-off action never wait on each other.
+     */
+    private final ScheduledExecutorService poller = Executors.newScheduledThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "claudev-workspaces-poll");
         thread.setDaemon(true);
         return thread;
@@ -63,7 +71,7 @@ public final class WorkspacesPane extends BorderPane {
         this.controlPort = controlPort;
 
         setPadding(new Insets(16));
-        setTop(header());
+        setTop(new VBox(6, subtitle(), header()));
         setCenter(splitPane());
 
         controlPort.subscribeToOperationEvents(this::onOperationEvent);
@@ -73,6 +81,15 @@ public final class WorkspacesPane extends BorderPane {
     /** Call when the shell is hidden/closed for good — stops the polling thread. */
     public void shutdown() {
         poller.shutdownNow();
+    }
+
+    private Label subtitle() {
+        Label label = new Label(
+                "A workspace is just a named group: create one, then add RabbitMQ (or test-only \"dummy\") "
+                        + "instances to it and start/stop them. Pick a workspace on the left to see its instances.");
+        label.setWrapText(true);
+        label.setStyle("-fx-text-fill: #666; -fx-font-size: 11px;");
+        return label;
     }
 
     private HBox header() {

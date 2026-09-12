@@ -33,7 +33,21 @@ public final class InMemoryOperationEngine implements OperationEngine {
     private final OperationRepository operationRepository;
     private final OperationEventRepository operationEventRepository;
     private final int maxConcurrencyPerOperation;
-    private final ExecutorService operationDriverPool = Executors.newCachedThreadPool();
+    /**
+     * A real bug found from a user-reported hang, not assumed: {@link Executors#newCachedThreadPool()}
+     * uses the default thread factory, which creates non-daemon threads. A cached pool keeps an idle
+     * thread alive for 60s after its last task (or indefinitely if a task — e.g. a RabbitMQ node's
+     * multi-second boot wait, or a first-ever ~250MB binary download — is still running), so quitting
+     * the app while any operation had run recently left the JVM process alive with no visible window,
+     * looking exactly like a frozen app that needed a manual kill. Every other background executor in
+     * this codebase (see {@code WorkspacesPane}, {@code ConnectionsPane}) already uses daemon threads
+     * for this exact reason; this one didn't.
+     */
+    private final ExecutorService operationDriverPool = Executors.newCachedThreadPool(runnable -> {
+        Thread thread = new Thread(runnable, "claudev-operation-driver");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final Set<UUID> cancelledOperations = ConcurrentHashMap.newKeySet();
     private final List<Consumer<OperationEvent>> subscribers = new CopyOnWriteArrayList<>();

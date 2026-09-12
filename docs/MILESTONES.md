@@ -660,6 +660,44 @@ stay as the historical record of what each WP decided to skip and why; this list
 
 ---
 
+## Post-hoc bugfix: the app wouldn't quit (found from real usage, not testing)
+
+A user ran the real app, used it (created/started an instance), and had to kill it from Task
+Manager — the window closed but the process kept running. Root cause, confirmed by direct
+reproduction (not guessed): `InMemoryOperationEngine.operationDriverPool` was
+`Executors.newCachedThreadPool()` with the *default* thread factory, which creates **non-daemon**
+threads. A cached pool keeps an idle thread alive for 60s after its last task (or indefinitely if a
+task — a RabbitMQ node's boot wait, a first-ever ~250MB provisioning download — is still running).
+`Platform.exit()` only stops the JavaFX toolkit; the JVM itself only exits once every non-daemon
+thread finishes, so any operation that had run recently left the process alive with no visible
+window.
+
+**Verified by direct isolated reproduction, not just reasoning about it**: a standalone program
+submitted one real operation through the actual (unmodified) `InMemoryOperationEngine` class, then
+let `main()` return normally. With the original code, the JVM process did not exit even after 15
+seconds (had to be force-killed) despite `main()` having already returned. With a daemon
+`ThreadFactory` on `operationDriverPool`, the identical program exited in ~1.4 seconds. `DagScheduler`'s
+own per-operation `Executors.newFixedThreadPool` got the same daemon-thread fix as defense in depth
+— `shutdownNow()` can't force-terminate a thread stuck in a blocking native call, and a node action
+that never returns must never be able to keep the JVM alive after quit.
+
+**Also fixed, a real (if less severe) responsiveness bug from the same feedback**:
+`WorkspacesPane`'s background executor was single-threaded and shared between the periodic 2s table
+refresh and every user action (including RabbitMQ plugin enable/disable, which can take up to ~30s
+of real spawn-and-verify time) — a slow action queued the refresh behind it, so the table stopped
+updating and the UI looked stuck for that whole duration. Fixed by giving it (and
+`ConnectionsPane`'s equivalent) two threads instead of one.
+
+**Also addressed, a UX complaint from the same feedback**: "what is a Workspace, and why can
+Connections only do Redis?" were fair questions — nothing in the UI explained either. Tab titles
+are now "Workspaces (RabbitMQ)" and "Redis Connections" (not just "Workspaces"/"Connections"), and
+both panes gained a one-line subtitle explaining their purpose. This is a labeling fix, not an
+information-architecture redesign — a deeper rethink (e.g. should Redis connections live inside a
+workspace too?) is a real, separate, larger design conversation this fix does not attempt to have
+unilaterally.
+
+---
+
 ## Spike status
 
 | Spike | Status |

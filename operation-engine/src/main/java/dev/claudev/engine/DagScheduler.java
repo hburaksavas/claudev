@@ -71,7 +71,15 @@ final class DagScheduler {
             }
         }
 
-        ExecutorService pool = Executors.newFixedThreadPool(maxConcurrency);
+        // Daemon threads: shutdownNow() below can't force-terminate a thread stuck in a blocking
+        // native call, and a node action that never returns must never be able to keep the whole
+        // JVM alive after the user quits (see InMemoryOperationEngine's operationDriverPool for the
+        // user-reported hang this same class of bug caused).
+        ExecutorService pool = Executors.newFixedThreadPool(maxConcurrency, runnable -> {
+            Thread thread = new Thread(runnable, "claudev-dag-node");
+            thread.setDaemon(true);
+            return thread;
+        });
         try {
             CompletionService<NodeOutcome> completionService = new ExecutorCompletionService<>(pool);
             Map<Future<NodeOutcome>, String> inFlight = new HashMap<>();

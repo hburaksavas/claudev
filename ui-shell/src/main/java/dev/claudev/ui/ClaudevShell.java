@@ -100,8 +100,8 @@ public class ClaudevShell extends Application {
         connectionsPane = new ConnectionsPane(connectionControlPort);
 
         TabPane tabs = new TabPane(
-                new Tab("Workspaces", workspacesPane),
-                new Tab("Connections", connectionsPane),
+                new Tab("Workspaces (RabbitMQ)", workspacesPane),
+                new Tab("Redis Connections", connectionsPane),
                 new Tab("Diagnostics", sections));
         tabs.getTabs().forEach(tab -> tab.setClosable(false));
 

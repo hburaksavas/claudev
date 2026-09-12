@@ -672,10 +672,21 @@ stay as the historical record of what each WP decided to skip and why; this list
 6. **WP9 — packaging.** jlink/jpackage, code signing, licensing/SBOM gate, log rotation/redaction,
    the bounded graceful-shutdown DAG. Large, and blocked in practice on RISK_REGISTER's still-open
    jlink/jpackage no-admin-install spike.
-7. **RISK_REGISTER cleanup items**, roughly independent of the above and each other: a true clean-VM
-   run of the WP6 RabbitMQ spike (this session's spike ran on an already-tooled dev box); pre-spawn
-   argv logging (flagged since WP8); `ExecStep`'s per-workspace allow-list config surface (currently
-   only checks the path is absolute and exists); `MAX_PATH`/`\\?\` long-path support.
+7. ~~**Pre-spawn argv logging (flagged since WP8).**~~ DONE — `WindowsProcessLauncher.launch`
+   (platform-windows, the sole `CreateProcessW` choke point every real spawn goes through) now logs
+   `[jobName] <full constructed command line>` at `INFO` before spawning, so a hung or crashed spawn
+   still leaves a record of exactly what was about to run. Generalized from WP8's original FE-
+   pipeline-only framing to every spawn (RabbitMQ, Redis, dummy runtime, `ExecStep`, Git/Maven)
+   since they all funnel through this one method. Deliberately never logs `spec.environment()` —
+   argv is what the acceptance line asked for, and a future caller's forwarded env var isn't
+   guaranteed secret-free. **Verified for real**
+   (`WindowsProcessLauncherTest.logsTheFullArgvBeforeSpawning`): attaches a real `java.util.logging`
+   `Handler` to the actual logger `launch` writes to (not a mocked seam) and asserts the captured
+   record's formatted message contains the job name and the real spawned command line.
+8. **RISK_REGISTER cleanup items**, roughly independent of the above and each other: a true clean-VM
+   run of the WP6 RabbitMQ spike (this session's spike ran on an already-tooled dev box);
+   `ExecStep`'s per-workspace allow-list config surface (currently only checks the path is absolute
+   and exists); `MAX_PATH`/`\\?\` long-path support.
 
 ---
 

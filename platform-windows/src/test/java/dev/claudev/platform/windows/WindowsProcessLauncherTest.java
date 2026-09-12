@@ -12,6 +12,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -116,6 +120,55 @@ class WindowsProcessLauncherTest {
             assertThat(result.fingerprintSha256()).isEqualToIgnoringCase(expected);
             assertThat(result.imagePath()).endsWithIgnoringCase("ping.exe");
         } finally {
+            result.job().close();
+        }
+    }
+
+    /**
+     * WP8's "pre-execution argv is logged and inspectable" acceptance line, generalized to every
+     * real spawn (see {@link WindowsProcessLauncher#launch}'s own comment) — this attaches a real
+     * {@link Handler} to the actual logger {@code launch} writes to, rather than asserting against
+     * a mocked/injected logging seam, so it proves the log record genuinely exists and contains the
+     * constructed command line, not just that some method was called.
+     */
+    @Test
+    void logsTheFullArgvBeforeSpawning() {
+        assumeTrue(System.getProperty("os.name", "").toLowerCase().contains("win"));
+
+        Path pingExe = SYSTEM_ROOT.resolve("System32").resolve("ping.exe");
+        String jobName = "claudev-wp1-argv-log-" + UUID.randomUUID();
+        LaunchSpec spec = new LaunchSpec(
+                pingExe, List.of(pingExe.toString(), "-n", "1", "127.0.0.1"),
+                null, Map.of("SystemRoot", SYSTEM_ROOT.toString()), jobName, true);
+
+        Logger logger = Logger.getLogger(WindowsProcessLauncher.class.getName());
+        java.util.List<LogRecord> captured = new java.util.ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                captured.add(record);
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        handler.setLevel(Level.ALL);
+        logger.addHandler(handler);
+
+        LaunchResult result = WindowsProcessLauncher.launch(spec);
+        try {
+            assertThat(captured).anySatisfy(record -> {
+                String formatted = new java.text.MessageFormat(record.getMessage()).format(record.getParameters());
+                assertThat(formatted).contains(jobName).contains("ping.exe").contains("127.0.0.1");
+            });
+        } finally {
+            logger.removeHandler(handler);
+            result.job().terminate(1);
             result.job().close();
         }
     }

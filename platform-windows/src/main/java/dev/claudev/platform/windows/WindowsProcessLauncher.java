@@ -7,6 +7,8 @@ import com.sun.jna.platform.win32.WinNT.HANDLE;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Implements the D5 spawn ordering invariant end to end: {@code CreateProcessW} suspended, create
@@ -22,11 +24,22 @@ import java.time.Instant;
  */
 public final class WindowsProcessLauncher {
 
+    private static final Logger LOG = Logger.getLogger(WindowsProcessLauncher.class.getName());
+
     private WindowsProcessLauncher() {
     }
 
     public static LaunchResult launch(LaunchSpec spec) {
-        Memory commandLine = toNativeCommandLine(WindowsCommandLine.build(spec.argv()));
+        String builtCommandLine = WindowsCommandLine.build(spec.argv());
+        // Logged *before* CreateProcessW runs (docs/MILESTONES.md WP8's "pre-execution argv is
+        // logged and inspectable" acceptance line, generalized here to every real spawn rather than
+        // just the FE pipeline steps it was originally scoped to) — so a hung or crashed spawn still
+        // leaves a record of exactly what was about to run. Never logs `spec.environment()`: even
+        // though this codebase's spawns are explicit-environment-only (docs/SECURITY.md), a future
+        // caller's forwarded variable is not guaranteed secret-free, and argv is what the acceptance
+        // line actually asked for.
+        LOG.log(Level.INFO, "spawning [{0}] {1}", new Object[] {spec.jobName(), builtCommandLine});
+        Memory commandLine = toNativeCommandLine(builtCommandLine);
         Memory environment = WindowsEnvironmentBlock.encode(spec.environment());
 
         Kernel32Ext.StartupInfo startupInfo = new Kernel32Ext.StartupInfo();

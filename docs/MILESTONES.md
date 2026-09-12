@@ -557,19 +557,34 @@ expected Redis/Lettuce behavior), but a test-design bug: fixed by giving that te
 `ConnectionControlPort` the UI calls; not yet clicked through by hand (same screenshot-capture
 limitation noted since WP5).
 
-**10b — RabbitMQ: `RuntimeSource.Imported` support.** The domain type already models "user pointed
-the app at an install directory they manage themselves"; `RabbitMqRuntimeProvider`'s constructor
-already takes a plain `RabbitMqInstallation(erlangHome, rabbitmqSbin)` regardless of where those
-paths came from. **Build:** a UI path (or at minimum a config property) to supply a user's own
-Erlang/RabbitMQ install paths instead of `RabbitMqProviderHolder` always calling `.provision()`;
-validate both paths (`erl.exe`, `rabbitmq-server.bat` exist) before accepting them, matching
-`ExecutableLocator`'s validate-before-spawn discipline in `adapter-fe-pipeline`. **Explicitly out of
-scope, not a smaller version of this item:** attaching to a RabbitMQ node the user starts and keeps
-running independently of this app. `RuntimeProvider`'s contract is "this app spawns and owns the
-process lifecycle" (Job Object, `start`/`stop`) — there is no "attach to an existing PID" shape in
-the port, and adding one would be a `RuntimeProvider`-wide port change, not a RabbitMQ-specific
-tweak. If that capability is wanted later, treat it as its own ADR-worthy decision, not folded in
-here.
+**10b — RabbitMQ: `RuntimeSource.Imported` support — DONE (config property, not a UI screen).** The
+domain type already modeled "user pointed the app at an install directory they manage themselves";
+this wired it up. **Built:** `RabbitMqRuntimeProvider.fromImported(erlangHome, rabbitmqSbin)` — a
+new public factory (validates `erl.exe`/`rabbitmq-server.bat` exist, matching `ExecutableLocator`'s
+validate-before-spawn discipline in `adapter-fe-pipeline`, since `RabbitMqInstallation` itself is
+package-private and this is the only way to build a working provider from arbitrary paths outside
+`adapter-rabbitmq`); `RabbitMqProviderHolder` now takes two optional properties
+(`claudev.rabbitmq.imported-erlang-home`/`-imported-rabbitmq-sbin`) — when both are set, `.get()`
+uses them directly (no download, no checksum, no network at all); when unset, the existing
+`.provision()` pinned-pair path runs unchanged. A misconfigured imported path fails loudly on first
+use rather than silently falling back to downloading — a deliberate choice, since silently ignoring
+a path a user set on purpose would be a worse failure mode than an obvious error.
+
+**Verified for real**: `RabbitMqRuntimeProviderFromImportedTest` (a missing `erl.exe`/
+`rabbitmq-server.bat` is rejected with a clear message; a valid imported pair actually spawns and
+stops a real node); `RabbitMqProviderHolderTest` proves the imported branch — not the fallback —
+actually ran, by giving the holder a deliberately nonexistent `managedDir` fallback: if `.get()`
+had fallen through to `.provision()`, it would have failed against that bogus path, so a successful
+`.get()` is proof the imported paths were used.
+
+**Explicitly out of scope, not a smaller version of this item:** attaching to a RabbitMQ node the
+user starts and keeps running independently of this app. `RuntimeProvider`'s contract is "this app
+spawns and owns the process lifecycle" (Job Object, `start`/`stop`) — there is no "attach to an
+existing PID" shape in the port, and adding one would be a `RuntimeProvider`-wide port change, not a
+RabbitMQ-specific tweak. If that capability is wanted later, treat it as its own ADR-worthy
+decision, not folded in here. **Also not built:** any UI to set these two properties from within
+the app (today they're `application.properties`/JVM-arg only) — a real, small follow-up, not
+required for the underlying capability to work.
 
 **10c — RabbitMQ: plugin management (Shovel, management, federation, ...).** Nothing exists today —
 no `RabbitMqPlugins` class, no port method, no UI. **Build:** a `RabbitMqPlugins` helper mirroring
@@ -588,11 +603,11 @@ actually moving a message between two real queues.
 
 Supersedes scattered "not done"/"deferred" notes above as the actual next-up order — those notes
 stay as the historical record of what each WP decided to skip and why; this list is where to start.
-10a is done (see above) and stays listed only so the sequence reads as it was actually planned.
+10a/10b are done (see above) and stay listed only so the sequence reads as it was actually planned.
 
 1. ~~**10a — Redis manual connection UI.**~~ DONE.
-2. **10b — RabbitMQ `Imported` source support.** Small (a config/UI path plus validation), directly
-   answers "can a user bring their own RabbitMQ binaries" without touching the port.
+2. ~~**10b — RabbitMQ `Imported` source support.**~~ DONE as a config property; the UI to set it
+   from within the app is still open (see 10b's own note) but doesn't block the capability.
 3. **10c — RabbitMQ plugin management.** Medium: needs a real port/capability decision (see 10c's
    own scope note) before the mechanical `rabbitmq-plugins.bat` wiring is worth writing.
 4. **Redis Hash/List/Set/ZSet typed edit set.** Needs the `MutationRequest` DTO extension flagged in

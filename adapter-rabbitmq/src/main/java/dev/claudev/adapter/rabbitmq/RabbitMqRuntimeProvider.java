@@ -67,6 +67,25 @@ public final class RabbitMqRuntimeProvider implements RuntimeProvider {
         return new RabbitMqRuntimeProvider(installation);
     }
 
+    /**
+     * WP10b: a user-supplied ("{@code RuntimeSource.Imported}") Erlang/RabbitMQ pair — no download,
+     * no checksum (the user is trusted to have gotten their own binaries; that trust boundary is
+     * exactly what {@code Imported} means per docs/RABBITMQ_RUNTIME.md's "Sourcing" section).
+     * {@link RabbitMqInstallation} is package-private so this factory is the only way outside this
+     * package to build a working provider from arbitrary paths — callers can't skip validation.
+     */
+    public static RabbitMqRuntimeProvider fromImported(Path erlangHome, Path rabbitmqSbin) throws IOException {
+        Path erl = erlangHome.resolve("bin").resolve("erl.exe");
+        if (!Files.isRegularFile(erl)) {
+            throw new IOException("erl.exe not found at " + erl + " — erlangHome does not look like a valid Erlang/OTP install");
+        }
+        Path serverBat = rabbitmqSbin.resolve("rabbitmq-server.bat");
+        if (!Files.isRegularFile(serverBat)) {
+            throw new IOException("rabbitmq-server.bat not found at " + serverBat + " — rabbitmqSbin does not look like a valid RabbitMQ sbin directory");
+        }
+        return new RabbitMqRuntimeProvider(new RabbitMqInstallation(erlangHome, rabbitmqSbin));
+    }
+
     @Override
     public AdapterManifest manifest() {
         return new AdapterManifest(

@@ -263,13 +263,21 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
                 new RuntimeSource.Imported(instancesRoot), 1));
     }
 
+    /**
+     * The recorded {@code source} path reflects which mode {@link RabbitMqProviderHolder} is
+     * actually in (a user's imported binaries, or this app's managed/pinned-pair directory) — it is
+     * still always encoded as {@code Imported} ({@link dev.claudev.persistence.RuntimeDefinitionRepository}
+     * has no wire format for {@code Managed} yet), so this is bookkeeping/display metadata only, not
+     * something {@link #resolveProvider} reads back to decide behavior (that always asks {@code
+     * RabbitMqProviderHolder} directly).
+     */
     private void ensureRabbitMqRuntimeDefinition() {
         if (runtimeDefinitionRepository.findById(RABBITMQ_RUNTIME_DEFINITION_ID).isPresent()) {
             return;
         }
         runtimeDefinitionRepository.insert(new RuntimeDefinition(
                 RABBITMQ_RUNTIME_DEFINITION_ID, RuntimeKind.RABBIT_MQ,
-                new RuntimeSource.Imported(instancesRoot), 1));
+                new RuntimeSource.Imported(rabbitMqProviderHolder.describedSourcePath()), 1));
     }
 
     /**

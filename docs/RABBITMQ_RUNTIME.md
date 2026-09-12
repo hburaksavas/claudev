@@ -1,19 +1,23 @@
 # RabbitMQ Runtime
 
-## Status: adapter built and verified, not yet wired into the running app
+## Status: adapter built, verified, and wired into the running app
 
-`adapter-rabbitmq`'s `RabbitMqRuntimeProvider` is real — see docs/MILESTONES.md WP6 for what's
-built, the real bug found (a missing `PATH` broke every spawn until `RabbitMqEnvironment` fixed it),
-and why it isn't yet a Spring bean in `app-bootstrap` (no per-runtime-kind UI/dispatch exists yet;
-see WP5). Everything below this line describes the design the adapter implements and the spike that
-proved it feasible.
+`adapter-rabbitmq`'s `RabbitMqRuntimeProvider` is real and dispatched from the workspace UI (WP6);
+see docs/MILESTONES.md WP6 for what's built and the real bugs found along the way (a missing `PATH`
+broke every spawn, and a real `await_startup` race). `RabbitMqProviderHolder` provisions the pinned
+pair lazily on first use, not at app startup.
 
 ## Sourcing
 
 One pinned, checksum-verified RabbitMQ+Erlang/OTP version pair per platform build — not "bundle
 whatever RabbitMQ release is current." `RuntimeSource.Managed(version, erlangVersion,
-checksumSha256)` in `domain-core` models exactly this. `Imported`/`System` sources remain available
-for users who already manage their own install.
+checksumSha256)` in `domain-core` models exactly this.
+
+`Imported` (a user's own Erlang/RabbitMQ binaries) is real too (WP10b):
+`RabbitMqRuntimeProvider.fromImported(erlangHome, rabbitmqSbin)` validates both paths and skips
+provisioning entirely; set `claudev.rabbitmq.imported-erlang-home` and
+`claudev.rabbitmq.imported-rabbitmq-sbin` to use it — no UI for this yet, config-property only.
+`System` (auto-discovered, never lifecycle-owned) is not built.
 
 ## Per-instance isolation
 

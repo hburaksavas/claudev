@@ -25,8 +25,17 @@ public final class WindowsEnvironmentBlock {
     /**
      * Builds the native block. Entries are sorted by key (case-insensitively), matching the
      * ordering Windows itself produces via {@code GetEnvironmentStringsW} — documented by
-     * Microsoft as a requirement for a correctly formed block. An empty map still produces a valid
-     * (minimal) block: a single extra null terminator with no entries.
+     * Microsoft as a requirement for a correctly formed block.
+     *
+     * <p><b>A real, reproduced bug fixed here, not a hypothetical</b>: for one or more entries, each
+     * entry already ends with its own {@code '\0'}, so appending one final {@code '\0'} after the
+     * loop correctly leaves two consecutive null characters at the end (the documented "double-null
+     * termination"). But for zero entries, that same single trailing append leaves only ONE null
+     * character total — and {@code CreateProcessW} with {@code CREATE_UNICODE_ENVIRONMENT} rejects
+     * that with {@code ERROR_INVALID_PARAMETER} (confirmed via a real spawn of {@code ping.exe} with
+     * a literally-empty environment map, not assumed). No real caller in this codebase ever passed a
+     * truly empty environment before {@code RedisRuntimeProvider} did, which is why this went
+     * unnoticed. The zero-entries case now explicitly emits two null characters to match.
      *
      * <p>The returned {@link Memory} is native, GC-managed, and freed automatically when
      * unreachable — callers do not need to release it explicitly, but must keep a reference to it
@@ -43,6 +52,9 @@ public final class WindowsEnvironmentBlock {
             block.append(entry.getKey()).append('=').append(entry.getValue()).append('\0');
         }
         block.append('\0');
+        if (sorted.isEmpty()) {
+            block.append('\0');
+        }
 
         byte[] utf16le = block.toString().getBytes(StandardCharsets.UTF_16LE);
         Memory memory = new Memory(utf16le.length);

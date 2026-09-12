@@ -220,11 +220,12 @@ public final class RedisRuntimeProvider implements RuntimeProvider {
 
     /**
      * Forwards a small set of well-known variables from this JVM's own environment — mirrors
-     * {@code RabbitMqEnvironment.addBaseVars}. Not just a nicety: a real (not assumed) spawn failure
-     * found while building this feature showed {@code CreateProcessW} itself rejecting a literally
-     * empty environment block on this machine (probably AV/EDR process-creation hooking, not
-     * standard Win32 behavior) — every real spawn in this codebase already forwards a base
-     * environment for exactly this kind of reason, and Redis is no exception.
+     * {@code RabbitMqEnvironment.addBaseVars}. Redis itself needs at least {@code SystemRoot}/{@code
+     * TEMP} to behave like a normal Windows process (DLL search path, temp files), same as every
+     * other real spawn in this codebase — kept even after fixing the actual root cause of the spawn
+     * failure this uncovered ({@code WindowsEnvironmentBlock.encode}'s zero-entries case produced a
+     * single-, not double-, null-terminated block, which {@code CreateProcessW} rejected) so a
+     * genuinely empty environment is never relied on in practice either.
      */
     private static void addBaseVars(Map<String, String> env) {
         putIfPresent(env, "SystemRoot");

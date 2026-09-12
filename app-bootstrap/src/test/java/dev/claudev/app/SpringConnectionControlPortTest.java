@@ -1,8 +1,10 @@
 package dev.claudev.app;
 
 import dev.claudev.adapter.redis.RedisConnectionProvider;
+import dev.claudev.domain.AuditEntry;
 import dev.claudev.domain.Connection;
 import dev.claudev.domain.ConnectionId;
+import dev.claudev.persistence.AuditEntryRepository;
 import dev.claudev.persistence.ConnectionRepository;
 import dev.claudev.persistence.MigrationRunner;
 import dev.claudev.persistence.PragmaAppliedDataSource;
@@ -83,10 +85,18 @@ class SpringConnectionControlPortTest {
         return pragmaApplied;
     }
 
+    private record PortAndAudit(SpringConnectionControlPort port, AuditEntryRepository auditEntryRepository) {}
+
     private SpringConnectionControlPort newPort(Path tempDir) {
+        return newPortWithAudit(tempDir).port();
+    }
+
+    private PortAndAudit newPortWithAudit(Path tempDir) {
         DataSource dataSource = migratedDb(tempDir.resolve("conn-port.db"));
         ConnectionRepository repository = new ConnectionRepository(new JdbcTemplate(dataSource));
-        return new SpringConnectionControlPort(repository, new RedisConnectionProvider(), new DpapiSecretStore());
+        AuditEntryRepository auditEntryRepository = new AuditEntryRepository(new JdbcTemplate(dataSource));
+        SpringConnectionControlPort port = new SpringConnectionControlPort(repository, new RedisConnectionProvider(), new DpapiSecretStore(), auditEntryRepository);
+        return new PortAndAudit(port, auditEntryRepository);
     }
 
     @Test
@@ -126,16 +136,17 @@ class SpringConnectionControlPortTest {
 
             DataSource dataSource = migratedDb(tempDir.resolve("conn-restart.db"));
             ConnectionRepository repository = new ConnectionRepository(new JdbcTemplate(dataSource));
+            AuditEntryRepository auditEntryRepository = new AuditEntryRepository(new JdbcTemplate(dataSource));
             RedisConnectionProvider provider = new RedisConnectionProvider();
             DpapiSecretStore secretStore = new DpapiSecretStore();
 
-            SpringConnectionControlPort firstProcess = new SpringConnectionControlPort(repository, provider, secretStore);
+            SpringConnectionControlPort firstProcess = new SpringConnectionControlPort(repository, provider, secretStore, auditEntryRepository);
             Connection connection = firstProcess.connectToRedis("127.0.0.1", authPort, Optional.of(password));
 
             // A genuinely separate port instance sharing only the persisted repository — simulates a
             // restart where the in-memory "connectedInThisSession" set is empty again, forcing
             // ensureConnected() to resolve the DPAPI-stored password and re-authenticate for real.
-            SpringConnectionControlPort secondProcess = new SpringConnectionControlPort(repository, provider, secretStore);
+            SpringConnectionControlPort secondProcess = new SpringConnectionControlPort(repository, provider, secretStore, auditEntryRepository);
             String key = "claudev:test:reconnect:" + UUID.randomUUID();
 
             secondProcess.scanKeys(connection.id(), "", 10); // forces ensureConnected()/AUTH before any data exists
@@ -204,5 +215,45 @@ class SpringConnectionControlPortTest {
 
         Optional<String> value = port.getValue(connection.id(), prefix + "0");
         assertThat(value).contains("v0");
+    }
+
+    @Test
+    void authorizeMutationRefusesAWriteOnAStillLockedConnectionAndAuditsTheDenial(@TempDir Path tempDir) {
+        PortAndAudit portAndAudit = newPortWithAudit(tempDir);
+        SpringConnectionControlPort port = portAndAudit.port();
+        Connection connection = port.connectToRedis("127.0.0.1", PORT, Optional.empty());
+        String key = "claudev:test:locked:" + UUID.randomUUID();
+
+        assertThatThrownBy(() -> port.authorizeMutation(connection.id(), "SET", key, "v", Optional.empty()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("read-only");
+        assertThat(port.getValue(connection.id(), key)).isEmpty();
+
+        assertThat(portAndAudit.auditEntryRepository().findMostRecent(1))
+                .extracting(AuditEntry::action, AuditEntry::result)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("SET", "DENIED: connection is read-only — unlock it for writes first"));
+    }
+
+    @Test
+    void authorizeMutationSucceedsAfterUnlockAndAuditsTheAllow(@TempDir Path tempDir) {
+        SpringConnectionControlPort port = newPort(tempDir);
+        Connection connection = port.connectToRedis("127.0.0.1", PORT, Optional.empty());
+        String key = "claudev:test:unlocked:" + UUID.randomUUID();
+
+        port.unlockForWrites(connection.id());
+        port.authorizeMutation(connection.id(), "SET", key, "hello", Optional.empty());
+
+        assertThat(port.getValue(connection.id(), key)).contains("hello");
+    }
+
+    @Test
+    void authorizeMutationRefusesADenyListedOperationEvenWhenUnlocked(@TempDir Path tempDir) {
+        SpringConnectionControlPort port = newPort(tempDir);
+        Connection connection = port.connectToRedis("127.0.0.1", PORT, Optional.empty());
+        port.unlockForWrites(connection.id());
+
+        assertThatThrownBy(() -> port.authorizeMutation(connection.id(), "FLUSHALL", "irrelevant", "", Optional.empty()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("deny-listed");
     }
 }

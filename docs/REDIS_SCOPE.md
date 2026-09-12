@@ -8,9 +8,10 @@ a real bulk pattern-DEL preview/commit token flow with TOCTOU rejection, tested 
 Windows Redis 5.0.14.1 build (`tporadowski/redis`, test-only infrastructure, never bundled — see
 "Sourcing" below). Hash/List/Set/ZSet writes needed a `field` slot `MutationRequest` didn't have —
 see [ADR-012](adr/ADR-012-redis-typed-edit-set-dto-shape.md) for that DTO extension and why `HGETALL`/
-`SMEMBERS` reads are size-capped rather than cursor-paged like `SCAN`. **Not built**: any UI, and the
-`environmentClass`/audit-entry authorization gate `authorizeMutation` is named for but doesn't yet
-enforce — see MILESTONES.md WP7 for the exact remaining scope.
+`SMEMBERS` reads are size-capped rather than cursor-paged like `SCAN`. The `environmentClass`/
+audit-entry authorization gate below is also built and verified, in `app-bootstrap`'s
+`SpringConnectionControlPort`, not in `authorizeMutation` itself (see MILESTONES.md WP7 for why).
+**Not built**: any UI.
 
 ## Sourcing (not managed, connection-only)
 

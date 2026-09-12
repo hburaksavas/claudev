@@ -30,6 +30,16 @@ public interface ConnectionControlPort {
 
     Optional<String> getValue(ConnectionId id, String key);
 
+    /** Read-only until this is called for a given connection — see docs/SECURITY.md's "Remote Redis destructive-operation guard". Session-scoped: reverts to locked on app restart. */
+    void unlockForWrites(ConnectionId id);
+
+    /**
+     * Runs the base authorization+audit gate (docs/SECURITY.md) before dispatching to the adapter:
+     * an unlocked-but-otherwise-policy-refused mutation throws without ever reaching Redis, and
+     * every attempt — allowed or denied — writes an {@code AuditEntry} first.
+     */
+    void authorizeMutation(ConnectionId id, String operation, String key, String value, Optional<String> field);
+
     static ConnectionControlPort unavailable() {
         return new ConnectionControlPort() {
             @Override
@@ -54,6 +64,16 @@ public interface ConnectionControlPort {
 
             @Override
             public Optional<String> getValue(ConnectionId id, String key) {
+                throw new IllegalStateException("no backend wired");
+            }
+
+            @Override
+            public void unlockForWrites(ConnectionId id) {
+                throw new IllegalStateException("no backend wired");
+            }
+
+            @Override
+            public void authorizeMutation(ConnectionId id, String operation, String key, String value, Optional<String> field) {
                 throw new IllegalStateException("no backend wired");
             }
         };

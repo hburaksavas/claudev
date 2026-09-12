@@ -32,4 +32,25 @@ public record RedisSafetyPolicy(
                 true
         );
     }
+
+    /**
+     * The base authorization+audit gate every mutation must pass, single-key or bulk, before it may
+     * reach {@code ConnectionProvider#authorizeMutation} — docs/SECURITY.md's "Remote Redis
+     * destructive-operation guard". Deny-list and a non-empty allow-list are checked first (an
+     * operation the policy names explicitly, in either direction, is decided by that name, not by
+     * connection state); {@code readOnlyDefault} is the last check, so a connection unlocked for
+     * writes still can't run a deny-listed command.
+     */
+    public MutationAuthorization authorize(String operation, boolean unlockedForWrites) {
+        if (commandDenyList.contains(operation)) {
+            return MutationAuthorization.denied("operation is deny-listed for this connection: " + operation);
+        }
+        if (!commandAllowList.isEmpty() && !commandAllowList.contains(operation)) {
+            return MutationAuthorization.denied("operation is not in this connection's allow-list: " + operation);
+        }
+        if (readOnlyDefault && !unlockedForWrites) {
+            return MutationAuthorization.denied("connection is read-only — unlock it for writes first");
+        }
+        return MutationAuthorization.allowed();
+    }
 }

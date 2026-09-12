@@ -414,9 +414,28 @@ cases. `ADR-012` also records why a single generic `getCollection` method or ful
 `ZSCAN` cursor paging were considered and not built — see the ADR for the actual reasoning, not
 repeated here.
 
-**Still not built:** `environmentClass` gating/audit-entry writing and any UI (connection creation,
-browsing, the mutation-confirmation flow) — this WP delivers the adapter's full data-plane, not the
-application layer around it (matching how WP6 separated "adapter built" from "wired into the UI").
+**Authorization + audit gate — DONE, in `app-bootstrap`, not the adapter:** `adapter-redis`'s own
+`authorizeMutation` still just performs the operation, by design — the base
+`readOnlyDefault`/allow-list/deny-list gate from docs/SECURITY.md's "Remote Redis
+destructive-operation guard" is a decision about a *persisted `Connection`* (its `RedisSafetyPolicy`,
+its `environmentClass`), which the memory-only `ConnectionProvider` port has no way to see. It lives
+one layer up, in `SpringConnectionControlPort.authorizeMutation` (same "app-bootstrap sees the
+repository and the provider, the port doesn't" split `ConnectionControlPort`/`WorkspaceControlPort`
+already use): `RedisSafetyPolicy.authorize(operation, unlocked)` (`domain-core`, pure logic, 6 tests
+in `RedisSafetyPolicyTest`) is checked deny-list-then-allow-list-then-read-only, an `AuditEntry` is
+written for *every* attempt — allowed or denied — before dispatching to the adapter, and a denial
+throws without the mutation ever reaching Redis. `readOnlyDefault` starts locked and is unlocked
+per-connection via the new `unlockForWrites`, session-scoped exactly like the existing
+`connectedInThisSession` (a restart re-locks everything — no persisted "stays unlocked" state was
+built, since nothing asked for one). Verified for real in `SpringConnectionControlPortTest`
+(3 new tests, real SQLite + real Redis): a locked connection's `SET` is refused and audited as
+`DENIED`, the same `SET` succeeds once unlocked, and a deny-listed op (`FLUSHALL`) stays refused
+even when unlocked.
+
+**Still not built:** any UI (connection creation, browsing, the mutation-confirmation flow) — this
+WP delivers the adapter's full data-plane and the app-layer safety gate above it, not the UI
+(matching how WP6 separated "adapter built" from "wired into the UI"). `ConnectionControlPort`'s
+`authorizeMutation`/`unlockForWrites` are real and tested but have no caller in `ui-shell` yet.
 
 **Sourcing for testing, not production:** `adapter-redis` never downloads or manages a Redis binary
 — docs/REDIS_SCOPE.md's "no managed local Redis" rule is a real constraint honored here, not
@@ -427,11 +446,11 @@ purely as test infrastructure — exactly the same relationship `GitStepsIntegra
 real public GitHub repo, not a step toward shipping it.
 
 **Acceptance (from the original entry, status per item):** "a scripted single-key mutation against
-an unlocked-but-unclassified connection is refused by policy" — not testable yet, no
-`environmentClass`/authorization-gate layer exists above `authorizeMutation` (the port method name
-is aspirational; today it just performs the operation). "A glob delete without a completed token
-round trip is refused" — met. "The token is rejected when underlying data changed since preview,
-not only on expiry" — met.
+an unlocked-but-unclassified connection is refused by policy" — met (`authorizeMutationRefusesA
+WriteOnAStillLockedConnectionAndAuditsTheDenial`; every new `Connection` starts locked with
+`environmentClass` `UNKNOWN`, and the gate refuses it on `readOnlyDefault` alone). "A glob delete
+without a completed token round trip is refused" — met. "The token is rejected when underlying data
+changed since preview, not only on expiry" — met.
 
 ---
 
@@ -648,8 +667,8 @@ stay as the historical record of what each WP decided to skip and why; this list
 3. ~~**10c — RabbitMQ plugin management.**~~ DONE — a RabbitMQ-specific escape hatch on
    `RabbitMqRuntimeProvider`, not a `RuntimeProvider` port method (see 10c's own note on why).
 4. ~~**Redis Hash/List/Set/ZSet typed edit set.**~~ DONE — see [ADR-012](adr/ADR-012-redis-typed-edit-set-dto-shape.md).
-5. **Redis `environmentClass` authorization + audit-entry gate.** The safety layer `authorizeMutation`
-   is currently named for but doesn't yet enforce — docs/REDIS_SCOPE.md's core safety property.
+5. ~~**Redis `environmentClass` authorization + audit-entry gate.**~~ DONE — see WP7's own updated
+   note below for what the gate actually checks and where it lives.
 6. **WP9 — packaging.** jlink/jpackage, code signing, licensing/SBOM gate, log rotation/redaction,
    the bounded graceful-shutdown DAG. Large, and blocked in practice on RISK_REGISTER's still-open
    jlink/jpackage no-admin-install spike.

@@ -5,7 +5,7 @@ import dev.claudev.adapter.rabbitmq.detect.RabbitMqInstallDetector;
 import dev.claudev.adapter.redis.detect.RedisInstallDetector;
 import dev.claudev.domain.Instance;
 import dev.claudev.domain.Workspace;
-import dev.claudev.domain.detect.DetectedCandidate;
+import dev.claudev.domain.detect.DetectedRedisInstall;
 import dev.claudev.engine.InMemoryOperationEngine;
 import dev.claudev.engine.OperationEngine;
 import dev.claudev.engine.Reconciler;
@@ -34,14 +34,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * WP10d: {@link SpringWorkspaceControlPort#scanForRabbitMqCandidates()} delegation and
- * {@link RabbitMqProviderHolder#configureImported} accept/reject behavior through the full port.
+ * WP10f: {@link SpringWorkspaceControlPort#scanForRedisInstallCandidates()} delegation and
+ * {@link RedisProviderHolder#configureImported} accept/reject behavior through the full port.
  */
-class SpringWorkspaceControlPortRabbitMqDetectionTest {
+class SpringWorkspaceControlPortRedisRuntimeTest {
 
-    private static final Path SPIKE_ERLANG_HOME = Path.of("D:\\dev\\workspace\\claudev-spike\\otp27");
-    private static final Path SPIKE_RABBITMQ_SBIN =
-            Path.of("D:\\dev\\workspace\\claudev-spike\\rabbitmq\\rabbitmq_server-4.3.5\\sbin");
+    private static final Path REDIS_SERVER_EXE =
+            Path.of("D:\\dev\\workspace\\claudev-spike\\redis-test\\extracted\\redis-server.exe");
 
     private static DataSource migratedDb(Path dbFile) {
         DriverManagerDataSource driver = new DriverManagerDataSource("jdbc:sqlite:" + dbFile);
@@ -51,8 +50,8 @@ class SpringWorkspaceControlPortRabbitMqDetectionTest {
         return pragmaApplied;
     }
 
-    private SpringWorkspaceControlPort newPort(Path tempDir, RabbitMqProviderHolder rabbitMqProviderHolder) {
-        DataSource dataSource = migratedDb(tempDir.resolve("detection-port.db"));
+    private SpringWorkspaceControlPort newPort(Path tempDir, RedisProviderHolder redisProviderHolder) {
+        DataSource dataSource = migratedDb(tempDir.resolve("redis-runtime-port.db"));
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
 
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
@@ -60,6 +59,8 @@ class SpringWorkspaceControlPortRabbitMqDetectionTest {
         LaunchRecordRepository launchRecordRepository = new LaunchRecordRepository(jdbcTemplate);
         RuntimeDefinitionRepository runtimeDefinitionRepository = new RuntimeDefinitionRepository(jdbcTemplate);
         RuntimeProvider dummyRuntimeProvider = new DummyRuntimeProvider();
+        RabbitMqProviderHolder rabbitMqProviderHolder = new RabbitMqProviderHolder(
+                tempDir.resolve("unused-managed-dir").toString(), "", "");
         OperationEngine operationEngine = new InMemoryOperationEngine(
                 new OperationRepository(jdbcTemplate), new OperationEventRepository(jdbcTemplate), 4);
         Reconciler reconciler = new Reconciler(instanceRepository, launchRecordRepository, tempDir.resolve("managed-binaries"));
@@ -67,63 +68,55 @@ class SpringWorkspaceControlPortRabbitMqDetectionTest {
         return new SpringWorkspaceControlPort(
                 workspaceRepository, instanceRepository, launchRecordRepository, runtimeDefinitionRepository,
                 dummyRuntimeProvider, rabbitMqProviderHolder, new RabbitMqInstallDetector(),
-                new RedisProviderHolder(""), new RedisInstallDetector(), operationEngine, reconciler,
+                redisProviderHolder, new RedisInstallDetector(), operationEngine, reconciler,
                 tempDir.resolve("instances").toString());
     }
 
     @Test
-    void scanForRabbitMqCandidatesRunsTheRealDetectorWithoutThrowing(@TempDir Path tempDir) {
+    void scanForRedisInstallCandidatesRunsTheRealDetectorWithoutThrowing(@TempDir Path tempDir) {
         Assumptions.assumeTrue(System.getProperty("os.name", "").toLowerCase().contains("win"));
 
-        SpringWorkspaceControlPort port = newPort(tempDir,
-                new RabbitMqProviderHolder(tempDir.resolve("unused-managed-dir").toString(), "", ""));
+        SpringWorkspaceControlPort port = newPort(tempDir, new RedisProviderHolder(""));
 
-        List<DetectedCandidate> candidates = port.scanForRabbitMqCandidates();
+        List<DetectedRedisInstall> candidates = port.scanForRedisInstallCandidates();
 
         assertThat(candidates).isNotNull();
     }
 
     @Test
-    void createRabbitMqInstanceWithACandidateConfiguresTheProviderHolder(@TempDir Path tempDir) {
+    void createRedisInstanceWithACandidateConfiguresTheProviderHolder(@TempDir Path tempDir) {
         Assumptions.assumeTrue(System.getProperty("os.name", "").toLowerCase().contains("win"));
-        Assumptions.assumeTrue(Files.isRegularFile(SPIKE_ERLANG_HOME.resolve("bin").resolve("erl.exe")),
-                "WP6 spike cache not present on this machine — skipping");
+        Assumptions.assumeTrue(Files.isRegularFile(REDIS_SERVER_EXE),
+                "Redis test binary not present on this machine — skipping (see docs/REDIS_SCOPE.md)");
 
-        RabbitMqProviderHolder holder = new RabbitMqProviderHolder(
-                tempDir.resolve("unused-managed-dir").toString(), "", "");
+        RedisProviderHolder holder = new RedisProviderHolder("");
         SpringWorkspaceControlPort port = newPort(tempDir, holder);
 
-        Workspace workspace = port.createWorkspace("detection-workspace");
-        DetectedCandidate candidate = new DetectedCandidate(
-                "RabbitMQ 4.3.5 + Erlang/OTP 27 (test)", SPIKE_ERLANG_HOME, SPIKE_RABBITMQ_SBIN,
-                "4.3.5", "27.3.4.17", "test", true);
+        Workspace workspace = port.createWorkspace("redis-runtime-workspace");
+        DetectedRedisInstall candidate = new DetectedRedisInstall(REDIS_SERVER_EXE, "test");
 
-        Instance instance = port.createRabbitMqInstance(workspace.id(), "detected-instance", candidate);
+        Instance instance = port.createRedisInstance(workspace.id(), "detected-redis-instance", candidate);
 
         assertThat(instance).isNotNull();
         assertThat(holder.isImportedConfigured()).isTrue();
-        assertThat(holder.describedSourcePath()).isEqualTo(SPIKE_RABBITMQ_SBIN);
+        assertThat(holder.describedSourcePath()).isEqualTo(REDIS_SERVER_EXE);
     }
 
     @Test
-    void createRabbitMqInstanceRejectsAConflictingCandidateOnceAProviderIsActive(@TempDir Path tempDir) {
+    void createRedisInstanceRejectsAConflictingCandidateOnceAProviderIsActive(@TempDir Path tempDir) {
         Assumptions.assumeTrue(System.getProperty("os.name", "").toLowerCase().contains("win"));
-        Assumptions.assumeTrue(Files.isRegularFile(SPIKE_ERLANG_HOME.resolve("bin").resolve("erl.exe")),
-                "WP6 spike cache not present on this machine — skipping");
+        Assumptions.assumeTrue(Files.isRegularFile(REDIS_SERVER_EXE),
+                "Redis test binary not present on this machine — skipping (see docs/REDIS_SCOPE.md)");
 
-        RabbitMqProviderHolder holder = new RabbitMqProviderHolder(
-                tempDir.resolve("unused-managed-dir").toString(),
-                SPIKE_ERLANG_HOME.toString(), SPIKE_RABBITMQ_SBIN.toString());
+        RedisProviderHolder holder = new RedisProviderHolder(REDIS_SERVER_EXE.toString());
         SpringWorkspaceControlPort port = newPort(tempDir, holder);
 
-        Workspace workspace = port.createWorkspace("conflict-workspace");
-        port.createRabbitMqInstance(workspace.id(), "first-instance", SPIKE_ERLANG_HOME, SPIKE_RABBITMQ_SBIN);
+        Workspace workspace = port.createWorkspace("redis-conflict-workspace");
+        port.createRedisInstance(workspace.id(), "first-redis-instance", REDIS_SERVER_EXE);
 
-        DetectedCandidate conflicting = new DetectedCandidate(
-                "conflicting", Path.of("C:\\other\\erlang"), Path.of("C:\\other\\rabbitmq\\sbin"),
-                "4.3.5", "27.0.0", "test", true);
+        DetectedRedisInstall conflicting = new DetectedRedisInstall(Path.of("C:\\other\\redis-server.exe"), "test");
 
-        assertThatThrownBy(() -> port.createRabbitMqInstance(workspace.id(), "second-instance", conflicting))
+        assertThatThrownBy(() -> port.createRedisInstance(workspace.id(), "second-redis-instance", conflicting))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("already configured");
     }

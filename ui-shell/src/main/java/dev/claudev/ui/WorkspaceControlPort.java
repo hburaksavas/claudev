@@ -8,6 +8,7 @@ import dev.claudev.domain.OperationId;
 import dev.claudev.domain.Workspace;
 import dev.claudev.domain.WorkspaceId;
 import dev.claudev.domain.detect.DetectedCandidate;
+import dev.claudev.domain.detect.DetectedRedisInstall;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -49,6 +50,19 @@ public interface WorkspaceControlPort {
 
     /** Creates a real RabbitMQ instance from explicitly-typed/browsed paths — the fallback when auto-detection finds nothing. */
     Instance createRabbitMqInstance(WorkspaceId workspaceId, String name, Path erlangHome, Path rabbitmqSbin);
+
+    /**
+     * Scans the local machine for an already-installed {@code redis-server.exe} (WP10f) — the
+     * user's own binary, never bundled by this app (docs/REDIS_SCOPE.md). Runs real I/O (registry/
+     * PATH/filesystem), so callers must invoke this off the UI thread.
+     */
+    List<DetectedRedisInstall> scanForRedisInstallCandidates();
+
+    /** Creates a real, app-launched Redis instance (WP10f) using an auto-detected candidate from {@link #scanForRedisInstallCandidates()}. */
+    Instance createRedisInstance(WorkspaceId workspaceId, String name, DetectedRedisInstall candidate);
+
+    /** Creates a real, app-launched Redis instance from an explicitly-typed/browsed path — the fallback when auto-detection finds nothing. */
+    Instance createRedisInstance(WorkspaceId workspaceId, String name, Path redisServerExe);
 
     void deleteInstance(InstanceId id);
 
@@ -111,6 +125,21 @@ public interface WorkspaceControlPort {
 
             @Override
             public Instance createRabbitMqInstance(WorkspaceId workspaceId, String name, Path erlangHome, Path rabbitmqSbin) {
+                throw new IllegalStateException("no backend wired");
+            }
+
+            @Override
+            public List<DetectedRedisInstall> scanForRedisInstallCandidates() {
+                return List.of();
+            }
+
+            @Override
+            public Instance createRedisInstance(WorkspaceId workspaceId, String name, DetectedRedisInstall candidate) {
+                throw new IllegalStateException("no backend wired");
+            }
+
+            @Override
+            public Instance createRedisInstance(WorkspaceId workspaceId, String name, Path redisServerExe) {
                 throw new IllegalStateException("no backend wired");
             }
 

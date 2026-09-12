@@ -2,6 +2,7 @@ package dev.claudev.app;
 
 import dev.claudev.adapter.rabbitmq.RabbitMqRuntimeProvider;
 import dev.claudev.adapter.rabbitmq.detect.RabbitMqInstallDetector;
+import dev.claudev.adapter.redis.detect.RedisInstallDetector;
 import dev.claudev.domain.DesiredState;
 import dev.claudev.domain.Instance;
 import dev.claudev.domain.InstanceId;
@@ -19,6 +20,7 @@ import dev.claudev.domain.RuntimeSource;
 import dev.claudev.domain.Workspace;
 import dev.claudev.domain.WorkspaceId;
 import dev.claudev.domain.detect.DetectedCandidate;
+import dev.claudev.domain.detect.DetectedRedisInstall;
 import dev.claudev.engine.OperationEngine;
 import dev.claudev.engine.OperationNode;
 import dev.claudev.engine.OperationPlan;
@@ -72,6 +74,8 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
             UUID.nameUUIDFromBytes("adapter-dummy-runtime".getBytes(StandardCharsets.UTF_8)));
     private static final RuntimeDefinitionId RABBITMQ_RUNTIME_DEFINITION_ID = new RuntimeDefinitionId(
             UUID.nameUUIDFromBytes("adapter-rabbitmq".getBytes(StandardCharsets.UTF_8)));
+    private static final RuntimeDefinitionId REDIS_RUNTIME_DEFINITION_ID = new RuntimeDefinitionId(
+            UUID.nameUUIDFromBytes("adapter-redis-runtime".getBytes(StandardCharsets.UTF_8)));
 
     private final WorkspaceRepository workspaceRepository;
     private final InstanceRepository instanceRepository;
@@ -80,6 +84,8 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
     private final RuntimeProvider dummyRuntimeProvider;
     private final RabbitMqProviderHolder rabbitMqProviderHolder;
     private final RabbitMqInstallDetector rabbitMqInstallDetector;
+    private final RedisProviderHolder redisProviderHolder;
+    private final RedisInstallDetector redisInstallDetector;
     private final OperationEngine operationEngine;
     private final Reconciler reconciler;
     private final Path instancesRoot;
@@ -92,6 +98,8 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
             RuntimeProvider dummyRuntimeProvider,
             RabbitMqProviderHolder rabbitMqProviderHolder,
             RabbitMqInstallDetector rabbitMqInstallDetector,
+            RedisProviderHolder redisProviderHolder,
+            RedisInstallDetector redisInstallDetector,
             OperationEngine operationEngine,
             Reconciler reconciler,
             @Value("${claudev.managed-binaries-dir:${user.home}/.claudev/runtimes}") String managedBinariesDir) {
@@ -102,6 +110,8 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
         this.dummyRuntimeProvider = dummyRuntimeProvider;
         this.rabbitMqProviderHolder = rabbitMqProviderHolder;
         this.rabbitMqInstallDetector = rabbitMqInstallDetector;
+        this.redisProviderHolder = redisProviderHolder;
+        this.redisInstallDetector = redisInstallDetector;
         this.operationEngine = operationEngine;
         this.reconciler = reconciler;
         this.instancesRoot = Path.of(managedBinariesDir);
@@ -181,6 +191,44 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
         Instance instance = new Instance(
                 instanceId, workspaceId, RABBITMQ_RUNTIME_DEFINITION_ID, name,
                 new PortSet(ports, Set.of()),
+                instancesRoot.resolve(instanceId.value().toString()).resolve("data"),
+                instancesRoot.resolve(instanceId.value().toString()).resolve("logs"),
+                DesiredState.STOPPED, Optional.empty(), InstanceState.STOPPED);
+        instanceRepository.insert(instance);
+        return instance;
+    }
+
+    @Override
+    public List<DetectedRedisInstall> scanForRedisInstallCandidates() {
+        try {
+            return redisInstallDetector.detect();
+        } catch (RuntimeException e) {
+            // A failed scan degrades to the UI's manual-entry fallback, never a crashed dialog.
+            LOG.log(Level.WARNING, "Redis install auto-detection failed", e);
+            return List.of();
+        }
+    }
+
+    @Override
+    public Instance createRedisInstance(WorkspaceId workspaceId, String name, DetectedRedisInstall candidate) {
+        redisProviderHolder.configureImported(candidate.redisServerExe());
+        return createRedisInstance(workspaceId, name);
+    }
+
+    @Override
+    public Instance createRedisInstance(WorkspaceId workspaceId, String name, Path redisServerExe) {
+        redisProviderHolder.configureImported(redisServerExe);
+        return createRedisInstance(workspaceId, name);
+    }
+
+    private Instance createRedisInstance(WorkspaceId workspaceId, String name) {
+        ensureRedisRuntimeDefinition();
+
+        InstanceId instanceId = InstanceId.newId();
+        int port = findOneFreeLoopbackPort();
+        Instance instance = new Instance(
+                instanceId, workspaceId, REDIS_RUNTIME_DEFINITION_ID, name,
+                new PortSet(Set.of(port), Set.of()),
                 instancesRoot.resolve(instanceId.value().toString()).resolve("data"),
                 instancesRoot.resolve(instanceId.value().toString()).resolve("logs"),
                 DesiredState.STOPPED, Optional.empty(), InstanceState.STOPPED);
@@ -356,6 +404,21 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
     }
 
     /**
+     * WP10f: {@code RuntimeKind.REDIS} was previously dead-ended in {@link #resolveProvider} — this
+     * is the first real definition row for it. Same bookkeeping-only caveat as {@link
+     * #ensureRabbitMqRuntimeDefinition}: always encoded {@code Imported} regardless of internal
+     * holder state, since that's the only wire format {@link RuntimeDefinitionRepository} supports.
+     */
+    private void ensureRedisRuntimeDefinition() {
+        if (runtimeDefinitionRepository.findById(REDIS_RUNTIME_DEFINITION_ID).isPresent()) {
+            return;
+        }
+        runtimeDefinitionRepository.insert(new RuntimeDefinition(
+                REDIS_RUNTIME_DEFINITION_ID, RuntimeKind.REDIS,
+                new RuntimeSource.Imported(redisProviderHolder.describedSourcePath()), 1));
+    }
+
+    /**
      * {@code adapter-rabbitmq} isn't a Spring bean (see docs/MILESTONES.md WP6 — eager provisioning
      * at every app startup would mean an unconditional ~250MB download); it's provisioned lazily,
      * once, on first dispatch to a RABBIT_MQ instance via {@link RabbitMqProviderHolder}.
@@ -366,8 +429,7 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
         return switch (definition.kind()) {
             case DUMMY -> dummyRuntimeProvider;
             case RABBIT_MQ -> rabbitMqProviderHolder.get();
-            case REDIS -> throw new IllegalStateException(
-                    "REDIS is a ConnectionProvider (connection-only, D8) — it has no RuntimeProvider/instance lifecycle");
+            case REDIS -> redisProviderHolder.get();
         };
     }
 
@@ -381,6 +443,14 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
             return Set.of(first.getLocalPort(), second.getLocalPort());
         } catch (IOException e) {
             throw new IllegalStateException("Could not find free loopback ports: " + e.getMessage(), e);
+        }
+    }
+
+    private static int findOneFreeLoopbackPort() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (IOException e) {
+            throw new IllegalStateException("Could not find a free loopback port: " + e.getMessage(), e);
         }
     }
 

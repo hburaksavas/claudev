@@ -13,20 +13,33 @@ audit-entry authorization gate below is also built and verified, in `app-bootstr
 `SpringConnectionControlPort`, not in `authorizeMutation` itself (see MILESTONES.md WP7 for why).
 **Not built**: any UI.
 
-## Sourcing (not managed, connection-only)
+## Sourcing (no bundled binary; two lifecycle shapes exist)
 
-V1 ships `imported`/`system`/remote connection sources only — point at a Redis the user already
-has running, wherever it runs (native, WSL2, Docker, remote). **No bundled/managed local Redis.**
-Official Redis has no supported Windows server distribution; bundling an unofficial fork
-(tporadowski/redis-windows) or a commercial reimplementation (Memurai) under a "managed runtime"
-abstraction that implies an audited first-party artifact repeats the mistake this design
-explicitly rejected for RabbitMQ, at smaller scale. If a managed-local story is wanted later,
-WSL2-orchestrated real upstream Redis is the more defensible direction — but it conflicts with the
-"no admin requirement" constraint (enabling WSL2 needs admin + reboot) and is a product decision to
-make explicitly, not something architecture should quietly enable.
+**No bundled/managed local Redis.** Official Redis has no supported Windows server distribution;
+bundling an unofficial fork (tporadowski/redis-windows) or a commercial reimplementation (Memurai)
+under a "managed runtime" abstraction that implies an audited first-party artifact repeats the
+mistake this design explicitly rejected for RabbitMQ, at smaller scale. If a truly managed-local
+story is wanted later, WSL2-orchestrated real upstream Redis is the more defensible direction — but
+it conflicts with the "no admin requirement" constraint (enabling WSL2 needs admin + reboot) and is
+a product decision to make explicitly, not something architecture should quietly enable.
 
-Existing WSL2/Docker Redis endpoints may be *discovered* (detected and offered as a connection
-target) without the app ever taking lifecycle ownership of them.
+**Connection-only (WP10a)**: `adapter-redis`'s `RedisConnectionProvider` points at a Redis the user
+already has running, wherever it runs (native, WSL2, Docker, remote). Existing WSL2/Docker Redis
+endpoints may be *discovered* (`RedisEndpointDetector`: a TCP-connect + `PING` probe on common
+localhost ports) and offered as a connection target, without the app ever taking lifecycle
+ownership of them.
+
+**App-launched, user-owned binary (WP10f, added after this doc's original "connection-only"
+framing)**: `adapter-redis`'s `RedisRuntimeProvider` spawns/stops/health-checks a `redis-server.exe`
+the user already has installed (Memurai, tporadowski/redis-windows, a Chocolatey package — the app
+never chooses or cares which), via the same Job Object primitive every other instance uses. This is
+**not** a reversal of the "no bundled/managed local Redis" rule above: no binary is downloaded,
+selected, or checksummed by this app — the trust boundary is identical to RabbitMQ's
+`RuntimeSource.Imported` mode, which this document's rule was never about (it targets *bundling*,
+i.e. `Managed`). `RedisInstallDetector` (registry/PATH/well-known-directory scan, mirroring
+`adapter-rabbitmq.detect`'s shape minus the Erlang-style pairing step) finds an already-installed
+binary the same way the RabbitMQ dialog finds an install, so the user still isn't asked to type a
+path unless nothing is found.
 
 ## The typed edit set (concrete, not "small")
 

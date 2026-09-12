@@ -8,6 +8,7 @@ import dev.claudev.domain.OperationId;
 import dev.claudev.domain.Workspace;
 import dev.claudev.domain.WorkspaceId;
 import dev.claudev.domain.detect.DetectedCandidate;
+import dev.claudev.domain.detect.DetectedRedisInstall;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -34,6 +35,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
+import javafx.stage.FileChooser;
 
 import java.nio.file.Path;
 import java.time.format.DateTimeFormatter;
@@ -142,6 +144,9 @@ public final class WorkspacesPane extends BorderPane {
         Button newRabbitMq = new Button("New RabbitMQ instance...");
         newRabbitMq.setOnAction(e -> promptNewRabbitMqInstance());
 
+        Button newRedis = new Button("New Redis instance...");
+        newRedis.setOnAction(e -> promptNewRedisInstance());
+
         Button start = new Button("Start");
         start.setOnAction(e -> dispatch(controlPort::startInstance, "start"));
 
@@ -154,7 +159,7 @@ public final class WorkspacesPane extends BorderPane {
         Button plugins = new Button("Plugins...");
         plugins.setOnAction(e -> openPluginsDialog());
 
-        return new HBox(8, newInstance, newRabbitMq, start, stop, delete, plugins);
+        return new HBox(8, newInstance, newRabbitMq, newRedis, start, stop, delete, plugins);
     }
 
     private TableView<Instance> instanceTableWithColumns() {
@@ -351,6 +356,126 @@ public final class WorkspacesPane extends BorderPane {
         DirectoryChooser chooser = new DirectoryChooser();
         chooser.setTitle(title);
         java.io.File selected = chooser.showDialog(owner.getDialogPane().getScene().getWindow());
+        return selected == null ? Optional.empty() : Optional.of(selected.toPath());
+    }
+
+    /**
+     * WP10f: auto-scans for an already-installed {@code redis-server.exe} on open — the user only
+     * ever types a path by hand when the scan finds nothing (see {@link
+     * WorkspaceControlPort#scanForRedisInstallCandidates()}). Mirrors {@link
+     * #promptNewRabbitMqInstance()}'s dialog shape, with a single file field/picklist instead of two
+     * directory fields, since there's no Erlang-style second component to pair against.
+     */
+    private void promptNewRedisInstance() {
+        WorkspaceId workspaceId = selectedWorkspaceId;
+        if (workspaceId == null) {
+            return;
+        }
+
+        Dialog<Void> dialog = new Dialog<>();
+        dialog.setTitle("New Redis instance");
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        TextField name = new TextField();
+        Label status = new Label("Scanning for an installed redis-server.exe...");
+        ComboBox<DetectedRedisInstall> candidates = new ComboBox<>();
+        candidates.setCellFactory(list -> redisCandidateCell());
+        candidates.setButtonCell(redisCandidateCell());
+        candidates.setPrefWidth(320);
+
+        TextField redisServerExe = new TextField();
+        redisServerExe.setPromptText("Path to redis-server.exe");
+        Button browse = new Button("Browse...");
+        browse.setOnAction(e -> browseForFile(dialog, "Select redis-server.exe").ifPresent(p -> redisServerExe.setText(p.toString())));
+
+        GridPane grid = new GridPane();
+        grid.setHgap(8);
+        grid.setVgap(8);
+        grid.setPadding(new Insets(12));
+        grid.addRow(0, new Label("Name:"), name);
+        grid.addRow(1, status);
+        grid.addRow(2, candidates);
+        grid.addRow(3, new Label("redis-server.exe:"), redisServerExe, browse);
+        dialog.getDialogPane().setContent(grid);
+
+        Runnable applyManualMode = () -> {
+            candidates.setVisible(false);
+            candidates.setManaged(false);
+            redisServerExe.setVisible(true);
+            redisServerExe.setManaged(true);
+        };
+        Runnable applyDetectedMode = () -> {
+            candidates.setVisible(true);
+            candidates.setManaged(true);
+            redisServerExe.setVisible(false);
+            redisServerExe.setManaged(false);
+        };
+        applyManualMode.run();
+
+        Runnable rescan = () -> {
+            status.setText("Scanning for an installed redis-server.exe...");
+            runAsync(() -> {
+                List<DetectedRedisInstall> found = controlPort.scanForRedisInstallCandidates();
+                Platform.runLater(() -> {
+                    candidates.getItems().setAll(found);
+                    if (found.size() == 1) {
+                        applyDetectedMode.run();
+                        candidates.getSelectionModel().selectFirst();
+                        status.setText("Found: " + found.get(0).label());
+                    } else if (found.size() > 1) {
+                        applyDetectedMode.run();
+                        candidates.getSelectionModel().clearSelection();
+                        status.setText("Multiple installs found — pick one");
+                    } else {
+                        applyManualMode.run();
+                        status.setText("No installs found automatically — enter a path or Browse");
+                    }
+                });
+                return null;
+            });
+        };
+
+        Button rescanButton = new Button("Rescan");
+        rescanButton.setOnAction(e -> rescan.run());
+        grid.addRow(4, rescanButton);
+
+        rescan.run();
+
+        dialog.setResultConverter(bt -> {
+            if (bt != ButtonType.OK) {
+                return null;
+            }
+            String instanceName = name.getText();
+            if (instanceName.isBlank()) {
+                return null;
+            }
+            DetectedRedisInstall selected = candidates.getSelectionModel().getSelectedItem();
+            if (selected != null && candidates.isVisible()) {
+                runAsync(() -> controlPort.createRedisInstance(workspaceId, instanceName, selected));
+            } else {
+                Path exePath = Path.of(redisServerExe.getText().trim());
+                runAsync(() -> controlPort.createRedisInstance(workspaceId, instanceName, exePath));
+            }
+            return null;
+        });
+        dialog.showAndWait();
+    }
+
+    private ListCell<DetectedRedisInstall> redisCandidateCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(DetectedRedisInstall item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.label());
+            }
+        };
+    }
+
+    private Optional<Path> browseForFile(Dialog<?> owner, String title) {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(title);
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Executable", "*.exe"));
+        java.io.File selected = chooser.showOpenDialog(owner.getDialogPane().getScene().getWindow());
         return selected == null ? Optional.empty() : Optional.of(selected.toPath());
     }
 

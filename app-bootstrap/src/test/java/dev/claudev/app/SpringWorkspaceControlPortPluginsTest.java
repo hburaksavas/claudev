@@ -19,6 +19,7 @@ import dev.claudev.persistence.SqlitePragmaConfigurer;
 import dev.claudev.persistence.WorkspaceRepository;
 import dev.claudev.provider.runtime.RuntimeProvider;
 import dev.claudev.adapter.rabbitmq.detect.RabbitMqInstallDetector;
+import dev.claudev.adapter.redis.detect.RedisInstallDetector;
 import dev.claudev.ui.WorkspaceControlPort;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -78,7 +79,8 @@ class SpringWorkspaceControlPortPluginsTest {
 
         return new SpringWorkspaceControlPort(
                 workspaceRepository, instanceRepository, launchRecordRepository, runtimeDefinitionRepository,
-                dummyRuntimeProvider, rabbitMqProviderHolder, new RabbitMqInstallDetector(), operationEngine, reconciler,
+                dummyRuntimeProvider, rabbitMqProviderHolder, new RabbitMqInstallDetector(),
+                new RedisProviderHolder(""), new RedisInstallDetector(), operationEngine, reconciler,
                 tempDir.resolve("instances").toString());
     }
 

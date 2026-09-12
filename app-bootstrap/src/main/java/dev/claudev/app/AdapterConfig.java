@@ -5,6 +5,7 @@ import dev.claudev.adapter.fepipeline.FePipelineProvider;
 import dev.claudev.adapter.rabbitmq.detect.RabbitMqInstallDetector;
 import dev.claudev.adapter.redis.RedisConnectionProvider;
 import dev.claudev.adapter.redis.detect.RedisEndpointDetector;
+import dev.claudev.adapter.redis.detect.RedisInstallDetector;
 import dev.claudev.provider.connection.ConnectionProvider;
 import dev.claudev.provider.pipeline.ProjectPipelineProvider;
 import dev.claudev.provider.runtime.RuntimeProvider;
@@ -48,6 +49,12 @@ public class AdapterConfig {
     @Bean
     public RabbitMqInstallDetector rabbitMqInstallDetector() {
         return new RabbitMqInstallDetector();
+    }
+
+    /** WP10f: stateless — always scans the live machine, so no config is needed to construct it. */
+    @Bean
+    public RedisInstallDetector redisInstallDetector() {
+        return new RedisInstallDetector();
     }
 
     @Bean

@@ -22,11 +22,9 @@ import org.springframework.context.annotation.Primary;
 public class AdapterConfig {
 
     /**
-     * {@code adapter-rabbitmq} is still a stub (WP6 is blocked on the Spike A feasibility run — see
-     * docs/RABBITMQ_RUNTIME.md), so the {@link RuntimeProvider} wired here is the real, spawns-an-
-     * actual-process {@code adapter-dummy-runtime} instead — otherwise WP5's workspace UI would have
-     * nothing genuine to start/stop against. Swap this back to {@code RabbitMqRuntimeProvider} once
-     * WP6 lands; see docs/MILESTONES.md WP5.
+     * The default/primary-path {@link RuntimeProvider} for the workspace UI's "New dummy instance"
+     * flow (WP5). {@code adapter-rabbitmq} is real too (WP6) but is provisioned lazily and dispatched
+     * separately — see {@link RabbitMqProviderHolder} and {@link SpringWorkspaceControlPort}.
      */
     @Bean
     public RuntimeProvider dummyRuntimeProvider() {

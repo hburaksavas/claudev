@@ -31,9 +31,11 @@ platform-windows       JNA Win32 bindings: Job Objects, CreateProcessW-suspended
 
 persistence            SQLite WAL/busy-timeout config, a self-contained migration runner (not
                        Flyway — no SQLite support exists there), the 9-table schema, and
-                       repositories for Workspace/Instance/LaunchRecord/AuditEntry with
-                       optimistic concurrency (all real, tested against real on-disk SQLite
-                       files). Connection/pipeline/operation repositories not built yet.
+                       repositories for Workspace/Instance/LaunchRecord/AuditEntry/RuntimeDefinition/
+                       Connection/Operation/OperationEvent with optimistic concurrency (all real,
+                       tested against real on-disk SQLite files — ConnectionRepository is V1-scoped
+                       to remote connections and a fixed safety policy, see its own javadoc).
+                       Pipeline repository not built yet.
                        Depends on: domain-core, spring-boot-starter-jdbc, sqlite-jdbc.
 
 secret-store-dpapi     Default SecretStore: user-scoped DPAPI via JNA (real, tested).

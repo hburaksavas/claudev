@@ -518,21 +518,44 @@ All` leaves state that reconciles cleanly on next launch.
 
 ---
 
-## WP10 — RabbitMQ/Redis operational extras (not started)
+## WP10 — RabbitMQ/Redis operational extras
 
-Added after a user question about two capabilities neither adapter has: pointing the app at an
+Added after a user question about two capabilities neither adapter had: pointing the app at an
 already-installed Redis/RabbitMQ instead of the app-managed path, and RabbitMQ plugin management
-(e.g. Shovel). Both are real, scoped gaps, not currently reachable through any UI or adapter method.
+(e.g. Shovel).
 
-**10a — Redis: manual connection UI.** `RedisConnectionProvider.connect(ConnectOptions)` already
-does exactly this for real (WP7) — the gap is purely UI: no screen lets a user type a host/port/
-password and call it. **Build:** a "Connect to Redis..." dialog in `ui-shell` (host, port, optional
-password) wired through a new `WorkspaceControlPort` method that calls `connect`, persists the
-connection (a `Connection` row — `ConnectionRepository` doesn't exist yet either, see
-`docs/DOMAIN_MODEL.md`), and a minimal key-browse view (`scan` + `getString`) to prove the round
-trip. **Acceptance:** connecting to the real Windows Redis test build (or any real Redis) from the
-UI, browsing its keys via `SCAN` paging, and reading a value back, all through clicked-through UI,
-not just the existing `RedisConnectionProviderTest`.
+**10a — Redis: manual connection UI — DONE.** `RedisConnectionProvider.connect(ConnectOptions)`
+already did this for real (WP7); this built the UI and the persistence around it. **Built:** a
+`ConnectionRepository` (V1 scope: `ConnectionKind.Remote` only, a fixed `RedisSafetyPolicy
+.restrictiveDefault()` — see its own javadoc); `ConnectionControlPort` (`ui-shell`)/
+`SpringConnectionControlPort` (`app-bootstrap`), mirroring the `WorkspaceControlPort` interface-in-
+`ui-shell`/impl-in-`app-bootstrap` split; a password, if given, is stored via the real DPAPI
+`SecretStore` (never persisted as plaintext) and re-resolved transparently on first use after a
+restart (`ensureConnected`, tracking which connection ids this JVM run has actually opened, since
+the underlying Lettuce connection is memory-only); a new top-level "Connections" tab in
+`ClaudevShell`/`ConnectionsPane` (connections are global, not workspace-scoped, per `Connection`'s
+own domain shape) — connect dialog, connection list, `SCAN`-paged key browser, value viewer.
+
+**Verified for real** (`ConnectionRepositoryTest` + `SpringConnectionControlPortTest`, against the
+same genuine Windows Redis build WP7 uses): a connection round-trips through real SQLite with and
+without a secret; connecting to an unreachable address throws and persists nothing (no orphaned
+row for a connection that never actually worked); a password round-trips through a real DPAPI
+store and is correctly re-resolved and re-authenticated by a **separate** `SpringConnectionControlPort`
+instance sharing only the persisted repository — simulating an app restart — against a real
+password-`requirepass`d Redis instance; delete closes the real connection and removes the row;
+`SCAN` paging and `getString` work through the full port stack, not just the adapter directly.
+
+**A real bug found while testing, not assumed:** the first password-round-trip test pointed a
+password at a Redis instance that had none configured — Lettuce's connect handshake sends an
+unsolicited `AUTH`, which a real server without `requirepass` rejects, failing the *whole* `connect()`
+with a generic "Unable to connect" rather than a clear auth error. Not a code bug (this is correct,
+expected Redis/Lettuce behavior), but a test-design bug: fixed by giving that test its own real
+`--requirepass`-configured server rather than asserting a passwordless one would accept one.
+
+**Acceptance:** connecting to the real Windows Redis test build from the UI, browsing its keys via
+`SCAN` paging, and reading a value back — verified via the full test suite driving the same
+`ConnectionControlPort` the UI calls; not yet clicked through by hand (same screenshot-capture
+limitation noted since WP5).
 
 **10b — RabbitMQ: `RuntimeSource.Imported` support.** The domain type already models "user pointed
 the app at an install directory they manage themselves"; `RabbitMqRuntimeProvider`'s constructor
@@ -565,10 +588,9 @@ actually moving a message between two real queues.
 
 Supersedes scattered "not done"/"deferred" notes above as the actual next-up order — those notes
 stay as the historical record of what each WP decided to skip and why; this list is where to start.
+10a is done (see above) and stays listed only so the sequence reads as it was actually planned.
 
-1. **10a — Redis manual connection UI.** Smallest, highest-leverage: the adapter already works,
-   this only exposes it. Also the first real exercise of a `ConnectionRepository`/persisted
-   `Connection` row, which nothing has needed until now.
+1. ~~**10a — Redis manual connection UI.**~~ DONE.
 2. **10b — RabbitMQ `Imported` source support.** Small (a config/UI path plus validation), directly
    answers "can a user bring their own RabbitMQ binaries" without touching the port.
 3. **10c — RabbitMQ plugin management.** Medium: needs a real port/capability decision (see 10c's

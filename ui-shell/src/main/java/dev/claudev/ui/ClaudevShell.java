@@ -42,10 +42,12 @@ public class ClaudevShell extends Application {
     private static volatile Runnable onQuitRequested = () -> { };
     private static volatile DiagnosticsSource diagnosticsSource = DiagnosticsSource.unavailable();
     private static volatile WorkspaceControlPort workspaceControlPort = WorkspaceControlPort.unavailable();
+    private static volatile ConnectionControlPort connectionControlPort = ConnectionControlPort.unavailable();
     private static volatile ClaudevShell activeInstance;
 
     private final VBox sections = new VBox(18);
     private WorkspacesPane workspacesPane;
+    private ConnectionsPane connectionsPane;
     private Stage primaryStage;
     private TrayIcon trayIcon;
 
@@ -60,6 +62,10 @@ public class ClaudevShell extends Application {
 
     public static void setWorkspaceControlPort(WorkspaceControlPort port) {
         workspaceControlPort = port == null ? WorkspaceControlPort.unavailable() : port;
+    }
+
+    public static void setConnectionControlPort(ConnectionControlPort port) {
+        connectionControlPort = port == null ? ConnectionControlPort.unavailable() : port;
     }
 
     @Override
@@ -91,9 +97,11 @@ public class ClaudevShell extends Application {
         render();
 
         workspacesPane = new WorkspacesPane(workspaceControlPort);
+        connectionsPane = new ConnectionsPane(connectionControlPort);
 
         TabPane tabs = new TabPane(
                 new Tab("Workspaces", workspacesPane),
+                new Tab("Connections", connectionsPane),
                 new Tab("Diagnostics", sections));
         tabs.getTabs().forEach(tab -> tab.setClosable(false));
 
@@ -261,6 +269,9 @@ public class ClaudevShell extends Application {
             }
             if (instance.workspacesPane != null) {
                 instance.workspacesPane.shutdown();
+            }
+            if (instance.connectionsPane != null) {
+                instance.connectionsPane.shutdown();
             }
         }
         onQuitRequested.run();

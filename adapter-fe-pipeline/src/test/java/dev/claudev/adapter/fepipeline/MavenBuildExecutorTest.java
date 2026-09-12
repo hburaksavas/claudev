@@ -1,5 +1,7 @@
 package dev.claudev.adapter.fepipeline;
 
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,6 +17,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class MavenBuildExecutorTest {
 
     private final MavenBuildExecutor executor = new MavenBuildExecutor();
+
+    @BeforeEach
+    void requireMvnCmdResolvable() {
+        boolean resolvable;
+        try {
+            ExecutableLocator.locate("mvn.cmd", "CLAUDEV_MVN_CMD");
+            resolvable = true;
+        } catch (StepExecutionException e) {
+            resolvable = false;
+        }
+        Assumptions.assumeTrue(resolvable,
+                "mvn.cmd not on PATH and CLAUDEV_MVN_CMD not set — skipping (set CLAUDEV_MVN_CMD to a real mvn.cmd to run this)");
+    }
 
     @Test
     void runsARealMavenGoalAgainstATrivialProject(@TempDir Path tempDir) throws Exception {

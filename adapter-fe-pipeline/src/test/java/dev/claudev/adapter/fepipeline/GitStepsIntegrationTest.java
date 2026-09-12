@@ -88,7 +88,12 @@ class GitStepsIntegrationTest {
         // a descendant — so reset to an earlier ancestor first, then branch off from there.
         String rootSha = runGit(targetDir, "rev-list", "--max-parents=0", "HEAD").trim();
         runGit(targetDir, "reset", "--hard", rootSha);
-        runGit(targetDir, "commit", "--allow-empty", "-m", "local divergent commit");
+        // This spawn's environment deliberately carries no ambient git config (see
+        // CorporateNetworkEnvironment), and a machine may have no global user.name/user.email
+        // configured either — pass identity as -c flags for this one commit rather than depending
+        // on either machine state.
+        runGit(targetDir, "-c", "user.name=claudev-test", "-c", "user.email=claudev-test@example.invalid",
+                "commit", "--allow-empty", "-m", "local divergent commit");
 
         assertThatThrownBy(() -> gitFastForward.execute(Map.of(
                 "repoDir", targetDir.toString(), "remote", "origin", "branch", branch)))

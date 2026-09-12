@@ -16,8 +16,32 @@ checksumSha256)` in `domain-core` models exactly this.
 `Imported` (a user's own Erlang/RabbitMQ binaries) is real too (WP10b):
 `RabbitMqRuntimeProvider.fromImported(erlangHome, rabbitmqSbin)` validates both paths and skips
 provisioning entirely; set `claudev.rabbitmq.imported-erlang-home` and
-`claudev.rabbitmq.imported-rabbitmq-sbin` to use it — no UI for this yet, config-property only.
+`claudev.rabbitmq.imported-rabbitmq-sbin` to use it as a config-property fallback.
 `System` (auto-discovered, never lifecycle-owned) is not built.
+
+### Auto-detection (WP10d)
+
+The "New RabbitMQ instance" dialog no longer asks the user to type paths first: it scans the
+machine on open via `adapter-rabbitmq.detect.RabbitMqInstallDetector`, which combines
+`RabbitMqDetector` (registry `Uninstall` keys, a `rabbitmq_server-*` glob under
+`Program Files\RabbitMQ Server`, and `PATH`) and `ErlangDetector` (`ERLANG_HOME`, registry, and an
+`erl-*` glob under `Program Files`) — the underlying OS-scanning primitives
+(`RegistryUninstallScanner`, `PathEnvironmentScanner`, `GlobDirectoryScanner`,
+`EnvironmentVariableReader`) live in `platform-windows.detect` and know nothing about
+RabbitMQ/Erlang specifically.
+
+Every RabbitMQ×Erlang pairing found is checked against `RabbitMqErlangCompatibility` — a small
+hardcoded allow-list (RabbitMQ major 4 with Erlang/OTP major 26–27), with the proven-broken
+RabbitMQ 4.3.5 + OTP 29 pair explicitly excluded regardless of the window. A RabbitMQ install with
+no compatible Erlang install is dropped entirely; only compatible pairs are ever offered to the
+user (as `domain-core`'s `DetectedCandidate`). Zero candidates falls back to the manual
+Erlang-home/RabbitMQ-sbin text fields (with a `Browse...` directory chooser), same as before.
+
+**Known limitation**: `RabbitMqProviderHolder` is a single process-wide provider (one active
+Erlang/RabbitMQ pair per app run — see its Javadoc). Picking a second, different candidate once a
+provider is already active/configured throws `IllegalStateException` rather than silently
+switching; restart the app to choose a different install. This is a real constraint of the current
+single-provider design, not a bug.
 
 ## Plugin management (WP10c)
 

@@ -17,6 +17,10 @@
     <dependencies>
         <dependency>
             <groupId>dev.claudev</groupId>
+            <artifactId>domain-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.claudev</groupId>
             <artifactId>provider-api</artifactId>
         </dependency>
         <dependency>

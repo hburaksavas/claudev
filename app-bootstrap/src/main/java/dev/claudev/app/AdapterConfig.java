@@ -2,7 +2,9 @@ package dev.claudev.app;
 
 import dev.claudev.adapter.dummy.DummyRuntimeProvider;
 import dev.claudev.adapter.fepipeline.FePipelineProvider;
+import dev.claudev.adapter.rabbitmq.detect.RabbitMqInstallDetector;
 import dev.claudev.adapter.redis.RedisConnectionProvider;
+import dev.claudev.adapter.redis.detect.RedisEndpointDetector;
 import dev.claudev.provider.connection.ConnectionProvider;
 import dev.claudev.provider.pipeline.ProjectPipelineProvider;
 import dev.claudev.provider.runtime.RuntimeProvider;
@@ -34,6 +36,18 @@ public class AdapterConfig {
     @Bean
     public ConnectionProvider redisConnectionProvider() {
         return new RedisConnectionProvider();
+    }
+
+    /** WP10e: stateless — always probes the live machine, so no config is needed to construct it. */
+    @Bean
+    public RedisEndpointDetector redisEndpointDetector() {
+        return new RedisEndpointDetector();
+    }
+
+    /** WP10d: stateless — always scans the live machine, so no config is needed to construct it. */
+    @Bean
+    public RabbitMqInstallDetector rabbitMqInstallDetector() {
+        return new RabbitMqInstallDetector();
     }
 
     @Bean

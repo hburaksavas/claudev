@@ -1,6 +1,7 @@
 package dev.claudev.app;
 
 import dev.claudev.adapter.redis.RedisConnectionProvider;
+import dev.claudev.adapter.redis.detect.RedisEndpointDetector;
 import dev.claudev.domain.AuditEntry;
 import dev.claudev.domain.Connection;
 import dev.claudev.domain.ConnectionId;
@@ -95,7 +96,8 @@ class SpringConnectionControlPortTest {
         DataSource dataSource = migratedDb(tempDir.resolve("conn-port.db"));
         ConnectionRepository repository = new ConnectionRepository(new JdbcTemplate(dataSource));
         AuditEntryRepository auditEntryRepository = new AuditEntryRepository(new JdbcTemplate(dataSource));
-        SpringConnectionControlPort port = new SpringConnectionControlPort(repository, new RedisConnectionProvider(), new DpapiSecretStore(), auditEntryRepository);
+        SpringConnectionControlPort port = new SpringConnectionControlPort(
+                repository, new RedisConnectionProvider(), new DpapiSecretStore(), auditEntryRepository, new RedisEndpointDetector());
         return new PortAndAudit(port, auditEntryRepository);
     }
 
@@ -140,13 +142,15 @@ class SpringConnectionControlPortTest {
             RedisConnectionProvider provider = new RedisConnectionProvider();
             DpapiSecretStore secretStore = new DpapiSecretStore();
 
-            SpringConnectionControlPort firstProcess = new SpringConnectionControlPort(repository, provider, secretStore, auditEntryRepository);
+            SpringConnectionControlPort firstProcess = new SpringConnectionControlPort(
+                    repository, provider, secretStore, auditEntryRepository, new RedisEndpointDetector());
             Connection connection = firstProcess.connectToRedis("127.0.0.1", authPort, Optional.of(password));
 
             // A genuinely separate port instance sharing only the persisted repository — simulates a
             // restart where the in-memory "connectedInThisSession" set is empty again, forcing
             // ensureConnected() to resolve the DPAPI-stored password and re-authenticate for real.
-            SpringConnectionControlPort secondProcess = new SpringConnectionControlPort(repository, provider, secretStore, auditEntryRepository);
+            SpringConnectionControlPort secondProcess = new SpringConnectionControlPort(
+                    repository, provider, secretStore, auditEntryRepository, new RedisEndpointDetector());
             String key = "claudev:test:reconnect:" + UUID.randomUUID();
 
             secondProcess.scanKeys(connection.id(), "", 10); // forces ensureConnected()/AUTH before any data exists

@@ -2,6 +2,7 @@ package dev.claudev.ui;
 
 import dev.claudev.domain.Connection;
 import dev.claudev.domain.ConnectionId;
+import dev.claudev.domain.detect.DetectedRedisEndpoint;
 import dev.claudev.provider.connection.ScanPage;
 
 import java.util.List;
@@ -19,6 +20,13 @@ import java.util.Optional;
 public interface ConnectionControlPort {
 
     List<Connection> listConnections();
+
+    /**
+     * Probes for already-running Redis endpoints (native, WSL2, or port-published Docker — never
+     * lifecycle-owned, see docs/REDIS_SCOPE.md) via a real TCP-connect + {@code PING}. Runs real
+     * I/O, so callers must invoke this off the UI thread.
+     */
+    List<DetectedRedisEndpoint> scanForRedisEndpoints();
 
     /** Attempts a real connection before persisting anything — a connection row is never created for an address that couldn't actually be reached. */
     Connection connectToRedis(String host, int port, Optional<String> password);
@@ -44,6 +52,11 @@ public interface ConnectionControlPort {
         return new ConnectionControlPort() {
             @Override
             public List<Connection> listConnections() {
+                return List.of();
+            }
+
+            @Override
+            public List<DetectedRedisEndpoint> scanForRedisEndpoints() {
                 return List.of();
             }
 

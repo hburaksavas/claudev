@@ -60,6 +60,50 @@ class RabbitMqProviderHolderTest {
     }
 
     @Test
+    void configureImportedIsANoOpWhenAlreadyBuiltWithTheSamePaths() throws Exception {
+        requireSpikeCache();
+        RabbitMqProviderHolder holder = new RabbitMqProviderHolder(
+                "\\\\this\\path\\does\\not\\exist\\and\\would\\fail\\if\\used",
+                SPIKE_ERLANG_HOME.toString(), SPIKE_RABBITMQ_SBIN.toString());
+        holder.get();
+
+        holder.configureImported(SPIKE_ERLANG_HOME, SPIKE_RABBITMQ_SBIN);
+    }
+
+    @Test
+    void configureImportedRejectsADifferentPairOnceAProviderIsAlreadyBuilt() throws Exception {
+        requireSpikeCache();
+        RabbitMqProviderHolder holder = new RabbitMqProviderHolder(
+                "\\\\this\\path\\does\\not\\exist\\and\\would\\fail\\if\\used",
+                SPIKE_ERLANG_HOME.toString(), SPIKE_RABBITMQ_SBIN.toString());
+        holder.get();
+
+        assertThatThrownBy(() -> holder.configureImported(Path.of("C:\\other\\erlang"), Path.of("C:\\other\\rabbitmq\\sbin")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("already active");
+    }
+
+    @Test
+    void configureImportedAcceptsTheFirstCandidateBeforeAnyProviderIsBuilt() {
+        RabbitMqProviderHolder holder = new RabbitMqProviderHolder("unused", "", "");
+
+        holder.configureImported(SPIKE_ERLANG_HOME, SPIKE_RABBITMQ_SBIN);
+
+        assertThat(holder.isImportedConfigured()).isTrue();
+        assertThat(holder.describedSourcePath()).isEqualTo(SPIKE_RABBITMQ_SBIN);
+    }
+
+    @Test
+    void configureImportedRejectsADifferentPairOnceOneIsAlreadyConfiguredButNotYetBuilt() {
+        RabbitMqProviderHolder holder = new RabbitMqProviderHolder("unused", "", "");
+        holder.configureImported(SPIKE_ERLANG_HOME, SPIKE_RABBITMQ_SBIN);
+
+        assertThatThrownBy(() -> holder.configureImported(Path.of("C:\\other\\erlang"), Path.of("C:\\other\\rabbitmq\\sbin")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("already configured");
+    }
+
+    @Test
     void describedSourcePathReflectsWhicheverModeIsConfigured() {
         RabbitMqProviderHolder imported = new RabbitMqProviderHolder("managed-dir", "erlang-home", "rabbitmq-sbin");
         assertThat(imported.describedSourcePath()).isEqualTo(Path.of("rabbitmq-sbin"));

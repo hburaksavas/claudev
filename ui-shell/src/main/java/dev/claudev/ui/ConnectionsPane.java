@@ -3,6 +3,7 @@ package dev.claudev.ui;
 import dev.claudev.domain.Connection;
 import dev.claudev.domain.ConnectionId;
 import dev.claudev.domain.ConnectionKind;
+import dev.claudev.domain.detect.DetectedRedisEndpoint;
 import dev.claudev.provider.connection.ScanPage;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -13,8 +14,10 @@ import javafx.geometry.Orientation;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TableColumn;
@@ -27,6 +30,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -128,6 +132,11 @@ public final class ConnectionsPane extends BorderPane {
         return col;
     }
 
+    /**
+     * WP10e: auto-scans for already-running Redis endpoints (native, WSL2, port-published Docker —
+     * never lifecycle-owned, see docs/REDIS_SCOPE.md) on open. The host/port fields stay as the
+     * fallback (and remain editable even when a candidate is picked) rather than being replaced.
+     */
     private void promptConnect() {
         Dialog<Void> dialog = new Dialog<>();
         dialog.setTitle("Connect to Redis");
@@ -136,15 +145,43 @@ public final class ConnectionsPane extends BorderPane {
         TextField host = new TextField("127.0.0.1");
         TextField port = new TextField("6379");
         PasswordField password = new PasswordField();
+        Label status = new Label("Scanning for a running Redis...");
+        ComboBox<DetectedRedisEndpoint> found = new ComboBox<>();
+        found.setCellFactory(list -> endpointCell());
+        found.setButtonCell(endpointCell());
+        found.setPrefWidth(240);
+        found.getSelectionModel().selectedItemProperty().addListener((obs, old, selected) -> {
+            if (selected != null) {
+                host.setText(selected.host());
+                port.setText(String.valueOf(selected.port()));
+            }
+        });
 
         GridPane grid = new GridPane();
         grid.setHgap(8);
         grid.setVgap(8);
         grid.setPadding(new Insets(12));
-        grid.addRow(0, new Label("Host:"), host);
-        grid.addRow(1, new Label("Port:"), port);
-        grid.addRow(2, new Label("Password (optional):"), password);
+        grid.addRow(0, status);
+        grid.addRow(1, new Label("Found:"), found);
+        grid.addRow(2, new Label("Host:"), host);
+        grid.addRow(3, new Label("Port:"), port);
+        grid.addRow(4, new Label("Password (optional):"), password);
         dialog.getDialogPane().setContent(grid);
+
+        worker.submit(() -> {
+            List<DetectedRedisEndpoint> endpoints = controlPort.scanForRedisEndpoints();
+            Platform.runLater(() -> {
+                found.getItems().setAll(endpoints);
+                if (endpoints.isEmpty()) {
+                    status.setText("No running Redis found automatically — enter host/port manually");
+                } else if (endpoints.size() == 1) {
+                    found.getSelectionModel().selectFirst();
+                    status.setText("Found: " + endpoints.get(0).label());
+                } else {
+                    status.setText("Multiple endpoints found — pick one");
+                }
+            });
+        });
 
         dialog.setResultConverter(bt -> {
             if (bt == ButtonType.OK) {
@@ -153,6 +190,16 @@ public final class ConnectionsPane extends BorderPane {
             return null;
         });
         dialog.showAndWait();
+    }
+
+    private ListCell<DetectedRedisEndpoint> endpointCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(DetectedRedisEndpoint item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.label());
+            }
+        };
     }
 
     private void submitConnect(String host, String portText, String password) {

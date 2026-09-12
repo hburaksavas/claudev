@@ -7,7 +7,9 @@ import dev.claudev.domain.OperationEvent;
 import dev.claudev.domain.OperationId;
 import dev.claudev.domain.Workspace;
 import dev.claudev.domain.WorkspaceId;
+import dev.claudev.domain.detect.DetectedCandidate;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -35,8 +37,18 @@ public interface WorkspaceControlPort {
     /** Creates an instance backed by {@code adapter-dummy-runtime} (WP5) — a real spawned process, just not a real RabbitMQ/Redis one. */
     Instance createDummyInstance(WorkspaceId workspaceId, String name);
 
-    /** Creates a real RabbitMQ instance (WP6) — {@code adapter-rabbitmq} is provisioned lazily on first start, not at app startup (see docs/MILESTONES.md). */
-    Instance createRabbitMqInstance(WorkspaceId workspaceId, String name);
+    /**
+     * Scans the local machine for already-installed, mutually-compatible RabbitMQ+Erlang pairs
+     * (WP10d) — never asks the user to type a path unless the scan finds nothing. Runs real I/O
+     * (registry/PATH/filesystem), so callers must invoke this off the UI thread.
+     */
+    List<DetectedCandidate> scanForRabbitMqCandidates();
+
+    /** Creates a real RabbitMQ instance (WP6) using an auto-detected candidate from {@link #scanForRabbitMqCandidates()}. */
+    Instance createRabbitMqInstance(WorkspaceId workspaceId, String name, DetectedCandidate candidate);
+
+    /** Creates a real RabbitMQ instance from explicitly-typed/browsed paths — the fallback when auto-detection finds nothing. */
+    Instance createRabbitMqInstance(WorkspaceId workspaceId, String name, Path erlangHome, Path rabbitmqSbin);
 
     void deleteInstance(InstanceId id);
 
@@ -88,7 +100,17 @@ public interface WorkspaceControlPort {
             }
 
             @Override
-            public Instance createRabbitMqInstance(WorkspaceId workspaceId, String name) {
+            public List<DetectedCandidate> scanForRabbitMqCandidates() {
+                return List.of();
+            }
+
+            @Override
+            public Instance createRabbitMqInstance(WorkspaceId workspaceId, String name, DetectedCandidate candidate) {
+                throw new IllegalStateException("no backend wired");
+            }
+
+            @Override
+            public Instance createRabbitMqInstance(WorkspaceId workspaceId, String name, Path erlangHome, Path rabbitmqSbin) {
                 throw new IllegalStateException("no backend wired");
             }
 

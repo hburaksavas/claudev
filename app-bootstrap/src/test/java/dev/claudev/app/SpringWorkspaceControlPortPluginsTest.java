@@ -18,6 +18,7 @@ import dev.claudev.persistence.RuntimeDefinitionRepository;
 import dev.claudev.persistence.SqlitePragmaConfigurer;
 import dev.claudev.persistence.WorkspaceRepository;
 import dev.claudev.provider.runtime.RuntimeProvider;
+import dev.claudev.adapter.rabbitmq.detect.RabbitMqInstallDetector;
 import dev.claudev.ui.WorkspaceControlPort;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -77,7 +78,7 @@ class SpringWorkspaceControlPortPluginsTest {
 
         return new SpringWorkspaceControlPort(
                 workspaceRepository, instanceRepository, launchRecordRepository, runtimeDefinitionRepository,
-                dummyRuntimeProvider, rabbitMqProviderHolder, operationEngine, reconciler,
+                dummyRuntimeProvider, rabbitMqProviderHolder, new RabbitMqInstallDetector(), operationEngine, reconciler,
                 tempDir.resolve("instances").toString());
     }
 
@@ -86,7 +87,8 @@ class SpringWorkspaceControlPortPluginsTest {
         SpringWorkspaceControlPort port = newPort(tempDir);
 
         Workspace workspace = port.createWorkspace("plugin-test-workspace");
-        Instance instance = port.createRabbitMqInstance(workspace.id(), "plugin-test-instance");
+        Instance instance = port.createRabbitMqInstance(
+                workspace.id(), "plugin-test-instance", SPIKE_ERLANG_HOME, SPIKE_RABBITMQ_SBIN);
 
         OperationId startOperation = port.startInstance(instance.id());
         awaitTerminal(port, startOperation);

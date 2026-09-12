@@ -8,6 +8,8 @@ import dev.claudev.domain.EnvironmentClass;
 import dev.claudev.domain.MutationAuthorization;
 import dev.claudev.domain.RedisSafetyPolicy;
 import dev.claudev.domain.SecretRef;
+import dev.claudev.domain.detect.DetectedRedisEndpoint;
+import dev.claudev.adapter.redis.detect.RedisEndpointDetector;
 import dev.claudev.persistence.AuditEntryRepository;
 import dev.claudev.persistence.ConnectionRepository;
 import dev.claudev.provider.Ack;
@@ -28,6 +30,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * The real {@link ConnectionControlPort} (WP10a): {@code adapter-redis}'s {@code connect} already
@@ -51,26 +55,41 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class SpringConnectionControlPort implements ConnectionControlPort {
 
+    private static final Logger LOG = Logger.getLogger(SpringConnectionControlPort.class.getName());
+
     private final ConnectionRepository connectionRepository;
     private final ConnectionProvider connectionProvider;
     private final SecretStore secretStore;
     private final AuditEntryRepository auditEntryRepository;
+    private final RedisEndpointDetector redisEndpointDetector;
     private final Set<String> connectedInThisSession = ConcurrentHashMap.newKeySet();
     /** Read-only until explicitly unlocked — docs/SECURITY.md's "Remote Redis destructive-operation guard". Session-scoped like {@link #connectedInThisSession}: empty again after a restart. */
     private final Set<String> unlockedForWritesInThisSession = ConcurrentHashMap.newKeySet();
 
     public SpringConnectionControlPort(
             ConnectionRepository connectionRepository, ConnectionProvider connectionProvider, SecretStore secretStore,
-            AuditEntryRepository auditEntryRepository) {
+            AuditEntryRepository auditEntryRepository, RedisEndpointDetector redisEndpointDetector) {
         this.connectionRepository = connectionRepository;
         this.connectionProvider = connectionProvider;
         this.secretStore = secretStore;
         this.auditEntryRepository = auditEntryRepository;
+        this.redisEndpointDetector = redisEndpointDetector;
     }
 
     @Override
     public List<Connection> listConnections() {
         return connectionRepository.findAll();
+    }
+
+    @Override
+    public List<DetectedRedisEndpoint> scanForRedisEndpoints() {
+        try {
+            return redisEndpointDetector.detect();
+        } catch (RuntimeException e) {
+            // A failed scan degrades to the UI's manual host/port fallback, never a crashed dialog.
+            LOG.log(Level.WARNING, "Redis endpoint auto-detection failed", e);
+            return List.of();
+        }
     }
 
     @Override

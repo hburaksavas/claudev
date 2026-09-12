@@ -25,8 +25,8 @@ import java.nio.file.Path;
 class RabbitMqProviderHolder {
 
     private final Path managedDir;
-    private final String importedErlangHome;
-    private final String importedRabbitmqSbin;
+    private String importedErlangHome;
+    private String importedRabbitmqSbin;
     private volatile RabbitMqRuntimeProvider provider;
 
     RabbitMqProviderHolder(
@@ -49,6 +49,34 @@ class RabbitMqProviderHolder {
 
     boolean isImportedConfigured() {
         return !importedErlangHome.isBlank() && !importedRabbitmqSbin.isBlank();
+    }
+
+    /**
+     * WP10d: the user picked (via auto-detection or manual entry) a specific Erlang/RabbitMQ pair
+     * for a RabbitMQ instance they're creating right now. {@link #get} is a single process-wide
+     * lazily-built provider (one pair for the whole app run — see the class Javadoc), so a second,
+     * different pair can't silently take over an already-built provider; it's an honest limitation,
+     * not a bug, until per-instance runtime providers are supported. A no-op when the paths match
+     * what is already configured/built.
+     */
+    synchronized void configureImported(Path erlangHome, Path rabbitmqSbin) {
+        if (provider != null) {
+            if (!provider.erlangHome().equals(erlangHome) || !provider.rabbitmqSbin().equals(rabbitmqSbin)) {
+                throw new IllegalStateException(
+                        "A RabbitMQ install is already active for this session: "
+                                + provider.rabbitmqSbin()
+                                + ". Restart the app to choose a different install.");
+            }
+            return;
+        }
+        if (isImportedConfigured()
+                && (!Path.of(importedErlangHome).equals(erlangHome) || !Path.of(importedRabbitmqSbin).equals(rabbitmqSbin))) {
+            throw new IllegalStateException(
+                    "A RabbitMQ install is already configured for this session: "
+                            + importedRabbitmqSbin + ". Restart the app to choose a different install.");
+        }
+        this.importedErlangHome = erlangHome.toString();
+        this.importedRabbitmqSbin = rabbitmqSbin.toString();
     }
 
     /** For {@code RuntimeDefinition.source} bookkeeping only — not used to decide behavior (see {@link #get}). */

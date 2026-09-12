@@ -61,6 +61,16 @@ public final class RabbitMqRuntimeProvider implements RuntimeProvider {
         this.installation = installation;
     }
 
+    /** The Erlang/OTP home this provider is running against — for cross-checking a later import request against what's already active. */
+    public Path erlangHome() {
+        return installation.erlangHome();
+    }
+
+    /** The RabbitMQ sbin dir this provider is running against — for cross-checking a later import request against what's already active. */
+    public Path rabbitmqSbin() {
+        return installation.rabbitmqSbin();
+    }
+
     /** Provisions (downloading/verifying if needed) the pinned pair under {@code managedDir} and returns a ready-to-use provider. */
     public static RabbitMqRuntimeProvider provision(Path managedDir) throws IOException, InterruptedException {
         RabbitMqInstallation installation = new RabbitMqBinaryProvisioner().ensureProvisioned(managedDir);
@@ -75,14 +85,8 @@ public final class RabbitMqRuntimeProvider implements RuntimeProvider {
      * package to build a working provider from arbitrary paths — callers can't skip validation.
      */
     public static RabbitMqRuntimeProvider fromImported(Path erlangHome, Path rabbitmqSbin) throws IOException {
-        Path erl = erlangHome.resolve("bin").resolve("erl.exe");
-        if (!Files.isRegularFile(erl)) {
-            throw new IOException("erl.exe not found at " + erl + " — erlangHome does not look like a valid Erlang/OTP install");
-        }
-        Path serverBat = rabbitmqSbin.resolve("rabbitmq-server.bat");
-        if (!Files.isRegularFile(serverBat)) {
-            throw new IOException("rabbitmq-server.bat not found at " + serverBat + " — rabbitmqSbin does not look like a valid RabbitMQ sbin directory");
-        }
+        ErlangInstallValidator.erlExeIn(erlangHome);
+        RabbitMqInstallValidator.serverBatIn(rabbitmqSbin);
         return new RabbitMqRuntimeProvider(new RabbitMqInstallation(erlangHome, rabbitmqSbin));
     }
 

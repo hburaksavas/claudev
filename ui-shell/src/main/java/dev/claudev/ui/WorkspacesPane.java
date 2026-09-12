@@ -7,6 +7,7 @@ import dev.claudev.domain.OperationEvent;
 import dev.claudev.domain.OperationId;
 import dev.claudev.domain.Workspace;
 import dev.claudev.domain.WorkspaceId;
+import dev.claudev.domain.detect.DetectedCandidate;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -16,18 +17,25 @@ import javafx.geometry.Orientation;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.stage.DirectoryChooser;
 
+import java.nio.file.Path;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
@@ -206,25 +214,144 @@ public final class WorkspacesPane extends BorderPane {
     }
 
     private void promptNewInstance() {
-        promptNewInstance("New dummy instance", controlPort::createDummyInstance);
-    }
-
-    private void promptNewRabbitMqInstance() {
-        promptNewInstance("New RabbitMQ instance", controlPort::createRabbitMqInstance);
-    }
-
-    private void promptNewInstance(String title, java.util.function.BiFunction<WorkspaceId, String, Instance> create) {
         WorkspaceId workspaceId = selectedWorkspaceId;
         if (workspaceId == null) {
             return;
         }
         TextInputDialog dialog = new TextInputDialog();
-        dialog.setTitle(title);
+        dialog.setTitle("New dummy instance");
         dialog.setHeaderText(null);
         dialog.setContentText("Name:");
         dialog.showAndWait().filter(name -> !name.isBlank()).ifPresent(name -> {
-            runAsync(() -> create.apply(workspaceId, name));
+            runAsync(() -> controlPort.createDummyInstance(workspaceId, name));
         });
+    }
+
+    /**
+     * WP10d: auto-scans for an already-installed, compatible RabbitMQ+Erlang pair on open — the
+     * user only ever types paths by hand when the scan finds nothing (see
+     * {@link WorkspaceControlPort#scanForRabbitMqCandidates()}).
+     */
+    private void promptNewRabbitMqInstance() {
+        WorkspaceId workspaceId = selectedWorkspaceId;
+        if (workspaceId == null) {
+            return;
+        }
+
+        Dialog<Void> dialog = new Dialog<>();
+        dialog.setTitle("New RabbitMQ instance");
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        TextField name = new TextField();
+        Label status = new Label("Scanning for installed RabbitMQ + Erlang...");
+        ComboBox<DetectedCandidate> candidates = new ComboBox<>();
+        candidates.setCellFactory(list -> candidateCell());
+        candidates.setButtonCell(candidateCell());
+        candidates.setPrefWidth(320);
+
+        TextField erlangHome = new TextField();
+        erlangHome.setPromptText("Erlang home, e.g. C:\\Program Files\\erl-27.3.4.17");
+        TextField rabbitmqSbin = new TextField();
+        rabbitmqSbin.setPromptText("RabbitMQ sbin dir, e.g. ...\\rabbitmq_server-4.3.5\\sbin");
+        Button browseErlang = new Button("Browse...");
+        browseErlang.setOnAction(e -> browseForDirectory(dialog, "Select Erlang home").ifPresent(p -> erlangHome.setText(p.toString())));
+        Button browseRabbitMq = new Button("Browse...");
+        browseRabbitMq.setOnAction(e -> browseForDirectory(dialog, "Select RabbitMQ sbin directory").ifPresent(p -> rabbitmqSbin.setText(p.toString())));
+
+        GridPane grid = new GridPane();
+        grid.setHgap(8);
+        grid.setVgap(8);
+        grid.setPadding(new Insets(12));
+        grid.addRow(0, new Label("Name:"), name);
+        grid.addRow(1, status);
+        grid.addRow(2, candidates);
+        grid.addRow(3, new Label("Erlang home:"), erlangHome, browseErlang);
+        grid.addRow(4, new Label("RabbitMQ sbin:"), rabbitmqSbin, browseRabbitMq);
+        dialog.getDialogPane().setContent(grid);
+
+        Runnable applyManualMode = () -> {
+            candidates.setVisible(false);
+            candidates.setManaged(false);
+            erlangHome.setVisible(true);
+            erlangHome.setManaged(true);
+            rabbitmqSbin.setVisible(true);
+            rabbitmqSbin.setManaged(true);
+        };
+        Runnable applyDetectedMode = () -> {
+            candidates.setVisible(true);
+            candidates.setManaged(true);
+            erlangHome.setVisible(false);
+            erlangHome.setManaged(false);
+            rabbitmqSbin.setVisible(false);
+            rabbitmqSbin.setManaged(false);
+        };
+        applyManualMode.run();
+
+        Runnable rescan = () -> {
+            status.setText("Scanning for installed RabbitMQ + Erlang...");
+            runAsync(() -> {
+                List<DetectedCandidate> found = controlPort.scanForRabbitMqCandidates();
+                Platform.runLater(() -> {
+                    candidates.getItems().setAll(found);
+                    if (found.size() == 1) {
+                        applyDetectedMode.run();
+                        candidates.getSelectionModel().selectFirst();
+                        status.setText("Found: " + found.get(0).label());
+                    } else if (found.size() > 1) {
+                        applyDetectedMode.run();
+                        candidates.getSelectionModel().clearSelection();
+                        status.setText("Multiple installs found — pick one");
+                    } else {
+                        applyManualMode.run();
+                        status.setText("No installs found automatically — enter paths or Browse");
+                    }
+                });
+                return null;
+            });
+        };
+
+        Button rescanButton = new Button("Rescan");
+        rescanButton.setOnAction(e -> rescan.run());
+        grid.addRow(5, rescanButton);
+
+        rescan.run();
+
+        dialog.setResultConverter(bt -> {
+            if (bt != ButtonType.OK) {
+                return null;
+            }
+            String instanceName = name.getText();
+            if (instanceName.isBlank()) {
+                return null;
+            }
+            DetectedCandidate selected = candidates.getSelectionModel().getSelectedItem();
+            if (selected != null && candidates.isVisible()) {
+                runAsync(() -> controlPort.createRabbitMqInstance(workspaceId, instanceName, selected));
+            } else {
+                Path erlangHomePath = Path.of(erlangHome.getText().trim());
+                Path rabbitmqSbinPath = Path.of(rabbitmqSbin.getText().trim());
+                runAsync(() -> controlPort.createRabbitMqInstance(workspaceId, instanceName, erlangHomePath, rabbitmqSbinPath));
+            }
+            return null;
+        });
+        dialog.showAndWait();
+    }
+
+    private ListCell<DetectedCandidate> candidateCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(DetectedCandidate item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.label());
+            }
+        };
+    }
+
+    private Optional<Path> browseForDirectory(Dialog<?> owner, String title) {
+        DirectoryChooser chooser = new DirectoryChooser();
+        chooser.setTitle(title);
+        java.io.File selected = chooser.showDialog(owner.getDialogPane().getScene().getWindow());
+        return selected == null ? Optional.empty() : Optional.of(selected.toPath());
     }
 
     private void deleteSelectedWorkspace() {

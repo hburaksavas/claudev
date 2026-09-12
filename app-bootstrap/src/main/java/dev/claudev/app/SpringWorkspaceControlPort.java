@@ -1,6 +1,7 @@
 package dev.claudev.app;
 
 import dev.claudev.adapter.rabbitmq.RabbitMqRuntimeProvider;
+import dev.claudev.adapter.rabbitmq.detect.RabbitMqInstallDetector;
 import dev.claudev.domain.DesiredState;
 import dev.claudev.domain.Instance;
 import dev.claudev.domain.InstanceId;
@@ -17,6 +18,7 @@ import dev.claudev.domain.RuntimeKind;
 import dev.claudev.domain.RuntimeSource;
 import dev.claudev.domain.Workspace;
 import dev.claudev.domain.WorkspaceId;
+import dev.claudev.domain.detect.DetectedCandidate;
 import dev.claudev.engine.OperationEngine;
 import dev.claudev.engine.OperationNode;
 import dev.claudev.engine.OperationPlan;
@@ -48,6 +50,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * The real {@link WorkspaceControlPort}: wires workspace/instance CRUD to the SQLite repositories
@@ -61,6 +65,8 @@ import java.util.function.Consumer;
 @Component
 public class SpringWorkspaceControlPort implements WorkspaceControlPort {
 
+    private static final Logger LOG = Logger.getLogger(SpringWorkspaceControlPort.class.getName());
+
     /** One shared, deterministic (not random-per-run) definition row per kind so restarts don't accumulate duplicates. */
     private static final RuntimeDefinitionId DUMMY_RUNTIME_DEFINITION_ID = new RuntimeDefinitionId(
             UUID.nameUUIDFromBytes("adapter-dummy-runtime".getBytes(StandardCharsets.UTF_8)));
@@ -73,6 +79,7 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
     private final RuntimeDefinitionRepository runtimeDefinitionRepository;
     private final RuntimeProvider dummyRuntimeProvider;
     private final RabbitMqProviderHolder rabbitMqProviderHolder;
+    private final RabbitMqInstallDetector rabbitMqInstallDetector;
     private final OperationEngine operationEngine;
     private final Reconciler reconciler;
     private final Path instancesRoot;
@@ -84,6 +91,7 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
             RuntimeDefinitionRepository runtimeDefinitionRepository,
             RuntimeProvider dummyRuntimeProvider,
             RabbitMqProviderHolder rabbitMqProviderHolder,
+            RabbitMqInstallDetector rabbitMqInstallDetector,
             OperationEngine operationEngine,
             Reconciler reconciler,
             @Value("${claudev.managed-binaries-dir:${user.home}/.claudev/runtimes}") String managedBinariesDir) {
@@ -93,6 +101,7 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
         this.runtimeDefinitionRepository = runtimeDefinitionRepository;
         this.dummyRuntimeProvider = dummyRuntimeProvider;
         this.rabbitMqProviderHolder = rabbitMqProviderHolder;
+        this.rabbitMqInstallDetector = rabbitMqInstallDetector;
         this.operationEngine = operationEngine;
         this.reconciler = reconciler;
         this.instancesRoot = Path.of(managedBinariesDir);
@@ -142,7 +151,29 @@ public class SpringWorkspaceControlPort implements WorkspaceControlPort {
     }
 
     @Override
-    public Instance createRabbitMqInstance(WorkspaceId workspaceId, String name) {
+    public List<DetectedCandidate> scanForRabbitMqCandidates() {
+        try {
+            return rabbitMqInstallDetector.detectValidCandidates();
+        } catch (RuntimeException e) {
+            // A failed scan degrades to the UI's manual-entry fallback, never a crashed dialog.
+            LOG.log(Level.WARNING, "RabbitMQ install auto-detection failed", e);
+            return List.of();
+        }
+    }
+
+    @Override
+    public Instance createRabbitMqInstance(WorkspaceId workspaceId, String name, DetectedCandidate candidate) {
+        rabbitMqProviderHolder.configureImported(candidate.erlangHome(), candidate.rabbitmqSbin());
+        return createRabbitMqInstance(workspaceId, name);
+    }
+
+    @Override
+    public Instance createRabbitMqInstance(WorkspaceId workspaceId, String name, Path erlangHome, Path rabbitmqSbin) {
+        rabbitMqProviderHolder.configureImported(erlangHome, rabbitmqSbin);
+        return createRabbitMqInstance(workspaceId, name);
+    }
+
+    private Instance createRabbitMqInstance(WorkspaceId workspaceId, String name) {
         ensureRabbitMqRuntimeDefinition();
 
         InstanceId instanceId = InstanceId.newId();
